@@ -1,0 +1,45 @@
+011526 Updates - DriveSearch.js Enhancements
+============================================
+
+1. EMAIL LABEL FILTERING (Dropdown + Cycle Button)
+--------------------------------------------------
+- Added EMAIL_LABELS dictionary for mapping domain patterns to friendly names
+  Example: 'github.com' -> 'GitHub', 'linkedin.com' -> 'LinkedIn'
+- Added label dropdown that appears after fetching emails
+  - Shows count per label: "GitHub (5)", "LinkedIn (3)"
+  - Sorted by most emails first
+  - Filters email list when selected
+- Added cycle button in sticky navbar (next to output mode radio)
+  - Cycles through: All -> first label -> second label -> ... -> All
+  - Shows current label and count
+
+2. OUTPUT MODE RADIO BUTTONS
+----------------------------
+- Replaced toggle switch with radio buttons
+- Options: "Copy to Clipboard" or "View/Edit"
+
+3. GOOGLE DRIVE EDIT/SAVE FUNCTIONALITY
+---------------------------------------
+- Changed Drive scope from 'drive.readonly' to 'drive.file' (read/write)
+- Added Edit/View toggle button (purple) in file content display
+- Added Save button (green, appears in edit mode only)
+- Added textarea for editing file content
+- Save writes content back to Google Drive via PATCH request
+
+4. EMAIL MODAL WITH GMAIL LABEL MANAGEMENT
+------------------------------------------
+- Changed Gmail scope from 'gmail.readonly' to 'gmail.modify'
+- Click on any email item to open modal
+- Modal displays:
+  - Subject (header)
+  - From and Date (meta section)
+  - Full email body (fetched on click, supports plain text and HTML)
+- Gmail labels dropdown fetches actual labels from user's account
+  - Shows user-created labels + INBOX, STARRED, IMPORTANT, TRASH
+- Apply Label button to add selected label to email
+- Copy Body button to copy email content to clipboard
+- Click outside modal or X button to close
+
+Files Modified:
+- src/DriveSearch.js
+- src/App.css

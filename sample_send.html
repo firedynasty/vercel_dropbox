@@ -1,0 +1,282 @@
+<html>
+<head>
+    <style>
+        .container {
+            margin: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .controls {
+            margin-bottom: 15px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .email-config {
+            margin-bottom: 15px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        .email-config input {
+            padding: 8px;
+            font-size: 14px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            width: 250px;
+        }
+        .text-areas {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        textarea {
+            width: 100%;
+            min-height: 400px;
+            padding: 12px;
+            font-family: monospace;
+            font-size: 14px;
+            line-height: 1.5;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            resize: vertical;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 14px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .paste-button {
+            background-color: #673AB7;
+        }
+        .paste-button:hover {
+            background-color: #5E35B1;
+        }
+        .python-button {
+            background-color: #2196F3;
+        }
+        .python-button:hover {
+            background-color: #1976D2;
+        }
+        .at-button {
+            background-color: #FF9800;
+        }
+        .at-button:hover {
+            background-color: #F57C00;
+        }
+        .json-button {
+            background-color: #00BCD4;
+        }
+        .json-button:hover {
+            background-color: #0097A7;
+        }
+        #status {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border-radius: 4px;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            z-index: 1000;
+        }
+        #status.show {
+            opacity: 1;
+        }
+        .textarea-label {
+            font-weight: bold;
+            margin-bottom: 5px;
+            display: block;
+        }
+        .info-box {
+            background-color: #e3f2fd;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            font-size: 14px;
+        }
+        .info-box code {
+            background-color: #fff;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Email Scheduler Generator</h2>
+        
+        <div class="info-box">
+            <strong>Input Format:</strong> Each line should be: <code>date, subject, message</code><br>
+            <strong>Date formats:</strong> 1/20/2026, 2026-01-20 14:30, or "2pm tomorrow"<br>
+            <strong>Example:</strong> <code>1/20/2026, birthday, remember to buy cake</code>
+        </div>
+
+        <div class="email-config">
+            <label for="emailInput">Your Email:</label>
+            <input type="email" id="emailInput" placeholder="your-email@example.com" value="">
+        </div>
+
+        <div class="controls">
+            <button onclick="copyFromClipboard()" class="paste-button">Paste from Clipboard</button>
+            <button onclick="generatePythonCommands()" class="python-button">Generate Python Commands</button>
+            <button onclick="generateAtCommands()" class="at-button">Generate 'at' Commands</button>
+            <button onclick="generateJson()" class="json-button">Generate JSON</button>
+            <button onclick="copyOutput()">Copy Output</button>
+        </div>
+        
+        <div class="text-areas">
+            <div>
+                <span class="textarea-label">Input (one email per line):</span>
+                <textarea id="inputText" placeholder="1/20/2026, birthday, remember to buy cake
+1/30/2026, payment credit card, total will be around 1 thousand dollars
+2/14/2026, valentine's day, order flowers"></textarea>
+            </div>
+            <div>
+                <span class="textarea-label">Output (commands):</span>
+                <textarea id="outputText" readonly></textarea>
+            </div>
+        </div>
+
+        <div id="status"></div>
+    </div>
+
+    <script>
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') {
+                copyFromClipboard();
+            }
+        });
+
+        function showStatus(message) {
+            const status = document.getElementById('status');
+            status.textContent = message;
+            status.classList.add('show');
+            setTimeout(() => {
+                status.classList.remove('show');
+            }, 2000);
+        }
+
+        async function copyFromClipboard() {
+            try {
+                const textarea = document.getElementById('inputText');
+                const clipboardText = await navigator.clipboard.readText();
+                textarea.value = clipboardText;
+                showStatus('Pasted from clipboard!');
+            } catch (err) {
+                console.error('Clipboard error:', err);
+                showStatus('Failed to read clipboard!');
+            }
+        }
+
+        function parseEmailLine(line) {
+            const parts = line.split(',').map(s => s.trim());
+            if (parts.length < 3) return null;
+            
+            return {
+                date: parts[0],
+                subject: parts[1],
+                message: parts.slice(2).join(', ')
+            };
+        }
+
+        function formatDateForPython(dateStr) {
+            // Try to parse and format date
+            // If it's already in format like "1/20/2026", convert to "2026-01-20 09:00"
+            if (dateStr.match(/^\d{1,2}\/\d{1,2}\/\d{4}$/)) {
+                const [month, day, year] = dateStr.split('/');
+                return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')} 09:00`;
+            }
+            return dateStr; // Return as-is if already formatted
+        }
+
+        function generatePythonCommands() {
+            const input = document.getElementById('inputText').value;
+            const email = document.getElementById('emailInput').value || 'your-email@example.com';
+            const lines = input.split('\n').filter(line => line.trim());
+            
+            let output = '# Python email scheduler commands\n';
+            output += '# Run these with: python3 email_scheduler.py schedule "date" "email" "subject" "message"\n\n';
+            
+            lines.forEach((line, index) => {
+                const parsed = parseEmailLine(line);
+                if (parsed) {
+                    const formattedDate = formatDateForPython(parsed.date);
+                    output += `python3 email_scheduler.py schedule "${formattedDate}" "${email}" "${parsed.subject}" "${parsed.message}"\n`;
+                }
+            });
+            
+            document.getElementById('outputText').value = output;
+            showStatus('Python commands generated!');
+        }
+
+        function generateAtCommands() {
+            const input = document.getElementById('inputText').value;
+            const email = document.getElementById('emailInput').value || 'your-email@example.com';
+            const lines = input.split('\n').filter(line => line.trim());
+            
+            let output = '# Bash "at" commands for scheduling emails\n';
+            output += '# Copy and paste these into your terminal\n\n';
+            
+            lines.forEach((line, index) => {
+                const parsed = parseEmailLine(line);
+                if (parsed) {
+                    // Escape single quotes in the message
+                    const escapedMessage = parsed.message.replace(/'/g, "'\\''");
+                    const escapedSubject = parsed.subject.replace(/'/g, "'\\''");
+                    
+                    output += `echo 'echo "${escapedMessage}" | mail -s "${escapedSubject}" "${email}"' | at ${parsed.date}\n`;
+                }
+            });
+            
+            document.getElementById('outputText').value = output;
+            showStatus('at commands generated!');
+        }
+
+        function generateJson() {
+            const input = document.getElementById('inputText').value;
+            const email = document.getElementById('emailInput').value || 'your-email@example.com';
+            const lines = input.split('\n').filter(line => line.trim());
+            
+            const scheduled = lines.map(line => {
+                const parsed = parseEmailLine(line);
+                if (!parsed) return null;
+                
+                return {
+                    datetime: formatDateForPython(parsed.date),
+                    to: email,
+                    subject: parsed.subject,
+                    body: parsed.message
+                };
+            }).filter(item => item !== null);
+            
+            const output = JSON.stringify(scheduled, null, 2);
+            document.getElementById('outputText').value = output;
+            showStatus('JSON generated!');
+        }
+
+        async function copyOutput() {
+            try {
+                const output = document.getElementById('outputText').value;
+                await navigator.clipboard.writeText(output);
+                showStatus('Copied to clipboard!');
+            } catch (err) {
+                console.error('Clipboard error:', err);
+                showStatus('Failed to copy!');
+            }
+        }
+    </script>
+</body>
+</html>
