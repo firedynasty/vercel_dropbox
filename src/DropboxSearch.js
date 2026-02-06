@@ -36,6 +36,10 @@ function DropboxSearch() {
   const [isEditMode, setIsEditMode] = useState(false);
   const [editContent, setEditContent] = useState('');
   const [saving, setSaving] = useState(false);
+  const [searchMode, setSearchMode] = useState('file');
+  const [folderPath, setFolderPath] = useState('');
+  const [folderFiles, setFolderFiles] = useState([]);
+  const [folderLoading, setFolderLoading] = useState(false);
 
   // Handle OAuth redirect on mount
   useEffect(() => {
@@ -102,6 +106,8 @@ function DropboxSearch() {
       setCurrentFilePath('');
       setIsEditMode(false);
       setEditContent('');
+      setFolderPath('');
+      setFolderFiles([]);
       setStatus('Signed out');
     }
   };
@@ -111,6 +117,8 @@ function DropboxSearch() {
 
     setLoading(true);
     setStatus('Searching...');
+    setFolderPath('');
+    setFolderFiles([]);
 
     try {
       const response = await fetch('https://api.dropboxapi.com/2/files/search_v2', {
@@ -147,9 +155,115 @@ function DropboxSearch() {
     }
   }, [searchQuery, accessToken]);
 
-  const handleFileClick = async (filePath, fileName, isFolder) => {
-    if (isFolder) return;
+  const loadFolder = useCallback(async (path) => {
+    setFolderLoading(true);
+    setStatus(`Loading folder...`);
 
+    try {
+      const response = await fetch('https://api.dropboxapi.com/2/files/list_folder', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ path }),
+      });
+
+      if (!response.ok) throw new Error('Failed to list folder');
+
+      const data = await response.json();
+      const entries = (data.entries || []).map((entry) => ({
+        id: entry.id,
+        name: entry.name,
+        path: entry.path_lower || entry.path_display,
+        isFolder: entry['.tag'] === 'folder',
+      }));
+
+      // Sort: folders first, then files, alphabetical within each
+      entries.sort((a, b) => {
+        if (a.isFolder !== b.isFolder) return a.isFolder ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+
+      setFolderPath(path);
+      setFolderFiles(entries);
+      setStatus(`Loaded ${entries.length} items from ${path}`);
+    } catch (error) {
+      setStatus('Error: ' + error.message);
+    } finally {
+      setFolderLoading(false);
+    }
+  }, [accessToken]);
+
+  const searchFolders = useCallback(async () => {
+    if (!searchQuery.trim() || !accessToken) return;
+
+    setLoading(true);
+    setStatus('Searching for folders...');
+    setFolderPath('');
+    setFolderFiles([]);
+
+    try {
+      const response = await fetch('https://api.dropboxapi.com/2/files/search_v2', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          query: searchQuery,
+          options: {
+            max_results: 20,
+            file_categories: [{ '.tag': 'folder' }],
+          },
+        }),
+      });
+
+      if (!response.ok) throw new Error('Folder search failed');
+
+      const data = await response.json();
+      const folders = (data.matches || [])
+        .map((m) => m.metadata?.metadata || m.metadata)
+        .filter((m) => m['.tag'] === 'folder')
+        .map((m) => ({
+          id: m.id,
+          name: m.name,
+          path: m.path_lower || m.path_display,
+          isFolder: true,
+        }));
+
+      setResults(folders);
+      setStatus(`Found ${folders.length} folders`);
+    } catch (error) {
+      setStatus('Error: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [searchQuery, accessToken]);
+
+  const handleSearch = useCallback(() => {
+    if (searchMode === 'file') {
+      searchFiles();
+    } else {
+      searchFolders();
+    }
+  }, [searchMode, searchFiles, searchFolders]);
+
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter') {
+      handleSearch();
+    }
+  };
+
+  const handleSidebarItemClick = async (filePath, fileName, isFolder) => {
+    if (isFolder) {
+      await loadFolder(filePath);
+      return;
+    }
+    await handleFileClick(filePath, fileName);
+  };
+
+  const handleFileClick = async (filePath, fileName) => {
     setStatus(`Fetching ${fileName}...`);
 
     try {
@@ -181,10 +295,9 @@ function DropboxSearch() {
     }
   };
 
-  const handleKeyPress = (e) => {
-    if (e.key === 'Enter') {
-      searchFiles();
-    }
+  const handleBackToResults = () => {
+    setFolderPath('');
+    setFolderFiles([]);
   };
 
   const toggleEditMode = () => {
@@ -235,6 +348,10 @@ function DropboxSearch() {
     }
   };
 
+  // Determine what to show in the sidebar list
+  const sidebarItems = folderPath ? folderFiles : results;
+  const showBackLink = !!folderPath;
+
   if (!APP_KEY) {
     return (
       <div className="dropbox-search">
@@ -248,31 +365,91 @@ function DropboxSearch() {
 
   return (
     <div className="dropbox-search">
-      <h1>Dropbox Search</h1>
+      <div className="dropbox-header">
+        <h1>Dropbox Search</h1>
+        {accessToken ? (
+          <button onClick={handleSignOut} className="sign-out-btn">
+            Sign Out
+          </button>
+        ) : (
+          <button onClick={handleSignIn} className="sign-in-btn">
+            Sign in with Dropbox
+          </button>
+        )}
+      </div>
 
-      {!accessToken ? (
-        <button onClick={handleSignIn} className="sign-in-btn">
-          Sign in with Dropbox
-        </button>
-      ) : (
-        <>
-          <div className="search-area">
-            <div className="search-box">
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyPress={handleKeyPress}
-                placeholder="Search file name..."
-                autoFocus
-              />
-              <button onClick={searchFiles} disabled={loading}>
-                {loading ? '...' : 'Search'}
-              </button>
-              <button onClick={handleSignOut} className="sign-out-btn">
-                Sign Out
-              </button>
+      {accessToken && (
+        <div className="dropbox-layout">
+          <div className="dropbox-sidebar">
+            <div className="sidebar-search">
+              <div className="search-box">
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyPress={handleKeyPress}
+                  placeholder={searchMode === 'file' ? 'Search files...' : 'Search folders...'}
+                  autoFocus
+                />
+                <button onClick={handleSearch} disabled={loading || folderLoading}>
+                  {loading || folderLoading ? '...' : 'Search'}
+                </button>
+              </div>
+              <div className="search-mode-toggle">
+                <label>
+                  <input
+                    type="radio"
+                    name="searchMode"
+                    value="file"
+                    checked={searchMode === 'file'}
+                    onChange={(e) => setSearchMode(e.target.value)}
+                  />
+                  Files
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name="searchMode"
+                    value="folder"
+                    checked={searchMode === 'folder'}
+                    onChange={(e) => setSearchMode(e.target.value)}
+                  />
+                  Folders
+                </label>
+              </div>
             </div>
+
+            {showBackLink && (
+              <div className="sidebar-nav">
+                <button className="back-link" onClick={handleBackToResults}>
+                  &larr; Back to results
+                </button>
+                <div className="folder-path">{folderPath}</div>
+              </div>
+            )}
+
+            <div className="sidebar-results">
+              {sidebarItems.map((file) => (
+                <div
+                  key={file.id}
+                  className="result-item"
+                  onClick={() => handleSidebarItemClick(file.path, file.name, file.isFolder)}
+                >
+                  <span className="file-icon">
+                    {file.isFolder ? '\uD83D\uDCC1' : '\uD83D\uDCC4'}
+                  </span>
+                  <span className="file-name">{file.name}</span>
+                  {file.isFolder && !folderPath && (
+                    <span className="file-path">{file.path}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="dropbox-main">
+            {status && <div className="status">{status}</div>}
+
             <div className="toggle-group">
               <div className="output-mode-selector">
                 <label>
@@ -297,81 +474,76 @@ function DropboxSearch() {
                 </label>
               </div>
             </div>
-          </div>
 
-          <div className="results">
-            {results.map((file) => (
-              <div
-                key={file.id}
-                className="result-item"
-                onClick={() => handleFileClick(file.path, file.name, file.isFolder)}
-              >
-                <span className="file-icon">
-                  {file.isFolder ? '📁' : '📄'}
-                </span>
-                <span className="file-name">{file.name}</span>
-              </div>
-            ))}
-          </div>
-
-          {status && <div className="status">{status}</div>}
-
-          {outputMode === 'div' && fileContent && (
-            <div className="file-content-display">
-              <div className="content-header">
-                <span>{currentFileName}</span>
-                <div className="content-actions">
-                  <button
-                    className="copy-btn"
-                    onClick={async () => {
-                      const contentToCopy = isEditMode ? editContent : fileContent;
-                      await navigator.clipboard.writeText(contentToCopy);
-                      setStatus(`Copied "${currentFileName}" to clipboard`);
-                    }}
-                  >
-                    Copy
-                  </button>
-                  <button
-                    className="edit-btn"
-                    onClick={toggleEditMode}
-                  >
-                    {isEditMode ? 'View' : 'Edit'}
-                  </button>
-                  {isEditMode && (
+            {outputMode === 'div' && fileContent && (
+              <div className="file-content-display">
+                <div className="content-header">
+                  <span>{currentFileName}</span>
+                  <div className="content-actions">
                     <button
-                      className="save-btn"
-                      onClick={saveFileToDropbox}
-                      disabled={saving}
+                      className="copy-btn"
+                      onClick={async () => {
+                        const contentToCopy = isEditMode ? editContent : fileContent;
+                        await navigator.clipboard.writeText(contentToCopy);
+                        setStatus(`Copied "${currentFileName}" to clipboard`);
+                      }}
                     >
-                      {saving ? 'Saving...' : 'Save'}
+                      Copy
                     </button>
-                  )}
-                  <button
-                    className="clear-btn"
-                    onClick={() => {
-                      setFileContent('');
-                      setCurrentFileName('');
-                      setCurrentFilePath('');
-                      setIsEditMode(false);
-                      setEditContent('');
-                    }}
-                  >
-                    Clear
-                  </button>
+                    <button
+                      className="paste-btn"
+                      onClick={async () => {
+                        const text = await navigator.clipboard.readText();
+                        setEditContent(text);
+                        setFileContent(text);
+                        setIsEditMode(true);
+                        setStatus(`Pasted clipboard into "${currentFileName}"`);
+                      }}
+                    >
+                      Paste
+                    </button>
+                    <button
+                      className="edit-btn"
+                      onClick={toggleEditMode}
+                    >
+                      {isEditMode ? 'View' : 'Edit'}
+                    </button>
+                    {isEditMode && (
+                      <button
+                        className="save-btn"
+                        onClick={saveFileToDropbox}
+                        disabled={saving}
+                      >
+                        {saving ? 'Saving...' : 'Save'}
+                      </button>
+                    )}
+                    <button
+                      className="clear-btn"
+                      onClick={() => {
+                        setFileContent('');
+                        setCurrentFileName('');
+                        setCurrentFilePath('');
+                        setIsEditMode(false);
+                        setEditContent('');
+                      }}
+                    >
+                      Clear
+                    </button>
+                  </div>
                 </div>
+                {isEditMode ? (
+                  <textarea
+                    className="edit-textarea"
+                    value={editContent}
+                    onChange={(e) => setEditContent(e.target.value)}
+                  />
+                ) : (
+                  <pre>{fileContent}</pre>
+                )}
               </div>
-              {isEditMode ? (
-                <textarea
-                  className="edit-textarea"
-                  value={editContent}
-                  onChange={(e) => setEditContent(e.target.value)}
-                />
-              ) : (
-                <pre>{fileContent}</pre>
-              )}
-            </div>
-          )}
-        </>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );
