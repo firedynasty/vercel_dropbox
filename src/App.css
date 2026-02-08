@@ -72,6 +72,12 @@
   flex-shrink: 0;
 }
 
+.sidebar-nav-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
 .back-link {
   background: none;
   border: none;
@@ -83,6 +89,21 @@
 
 .back-link:hover {
   color: #8be9fd;
+}
+
+.new-file-btn {
+  background: #28a745;
+  color: white;
+  border: none;
+  padding: 4px 10px;
+  font-size: 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.new-file-btn:hover {
+  background: #218838;
 }
 
 .sidebar-results {

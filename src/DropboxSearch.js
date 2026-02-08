@@ -300,6 +300,49 @@ function DropboxSearch() {
     setFolderFiles([]);
   };
 
+  const createNewFileFromClipboard = async () => {
+    if (!folderPath || !accessToken) return;
+
+    try {
+      const clipboardText = await navigator.clipboard.readText();
+      const now = new Date();
+      const hours = now.getHours();
+      const h12 = hours % 12 || 12;
+      const ampm = hours >= 12 ? 'PM' : 'AM';
+      const pad = (n) => String(n).padStart(2, '0');
+      const dateStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} at ${h12}.${pad(now.getMinutes())}.${pad(now.getSeconds())} ${ampm}`;
+      const fileName = `Screenshot ${dateStr}.md`;
+      const targetPath = `${folderPath}/${fileName}`;
+
+      setStatus(`Creating "${fileName}"...`);
+
+      const response = await fetch('https://content.dropboxapi.com/2/files/upload', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Dropbox-API-Arg': JSON.stringify({
+            path: targetPath,
+            mode: 'add',
+            autorename: true,
+            mute: true,
+          }),
+          'Content-Type': 'application/octet-stream',
+        },
+        body: clipboardText,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error_summary || `HTTP ${response.status}`);
+      }
+
+      setStatus(`Created "${fileName}"`);
+      await loadFolder(folderPath);
+    } catch (error) {
+      setStatus('Error creating file: ' + error.message);
+    }
+  };
+
   const toggleEditMode = () => {
     if (!isEditMode) {
       setEditContent(fileContent);
@@ -421,9 +464,14 @@ function DropboxSearch() {
 
             {showBackLink && (
               <div className="sidebar-nav">
-                <button className="back-link" onClick={handleBackToResults}>
-                  &larr; Back to results
-                </button>
+                <div className="sidebar-nav-row">
+                  <button className="back-link" onClick={handleBackToResults}>
+                    &larr; Back to results
+                  </button>
+                  <button className="new-file-btn" onClick={createNewFileFromClipboard}>
+                    + New File
+                  </button>
+                </div>
                 <div className="folder-path">{folderPath}</div>
               </div>
             )}
