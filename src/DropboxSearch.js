@@ -40,6 +40,7 @@ function DropboxSearch() {
   const [folderPath, setFolderPath] = useState('');
   const [folderFiles, setFolderFiles] = useState([]);
   const [folderLoading, setFolderLoading] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
 
   // Handle OAuth redirect on mount
   useEffect(() => {
@@ -286,6 +287,7 @@ function DropboxSearch() {
         setFileContent(content);
         setCurrentFileName(fileName);
         setCurrentFilePath(filePath);
+        setRenameValue(fileName);
         setIsEditMode(false);
         setEditContent('');
         setStatus(`Loaded "${fileName}"`);
@@ -388,6 +390,43 @@ function DropboxSearch() {
       setStatus('Error saving: ' + error.message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const renameFile = async () => {
+    if (!renameValue.trim() || renameValue === currentFileName || !currentFilePath || !accessToken) return;
+    const parentDir = currentFilePath.substring(0, currentFilePath.lastIndexOf('/'));
+    const newPath = `${parentDir}/${renameValue}`;
+
+    setStatus(`Renaming to "${renameValue}"...`);
+    try {
+      const response = await fetch('https://api.dropboxapi.com/2/files/move_v2', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          from_path: currentFilePath,
+          to_path: newPath,
+          autorename: true,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error_summary || `HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      const meta = data.metadata;
+      setCurrentFileName(meta.name);
+      setCurrentFilePath(meta.path_lower || meta.path_display);
+      setRenameValue(meta.name);
+      setStatus(`Renamed to "${meta.name}"`);
+      if (folderPath) await loadFolder(folderPath);
+    } catch (error) {
+      setStatus('Error renaming: ' + error.message);
     }
   };
 
@@ -526,7 +565,15 @@ function DropboxSearch() {
             {outputMode === 'div' && fileContent && (
               <div className="file-content-display">
                 <div className="content-header">
-                  <span>{currentFileName}</span>
+                  <div className="rename-row">
+                    <input
+                      className="rename-input"
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') renameFile(); }}
+                    />
+                    <button className="rename-btn" onClick={renameFile}>Rename</button>
+                  </div>
                   <div className="content-actions">
                     <button
                       className="copy-btn"
