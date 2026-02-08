@@ -476,3 +476,89 @@
   max-height: 70vh;
   overflow-y: auto;
 }
+
+/* Spreadsheet table */
+.csv-table-wrapper {
+  max-height: 70vh;
+  overflow: auto;
+}
+
+.csv-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: monospace;
+  font-size: 13px;
+}
+
+.csv-table th {
+  position: sticky;
+  top: 0;
+  background: #16213e;
+  color: #61dafb;
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 2px solid #0061FF;
+  white-space: nowrap;
+}
+
+.csv-table td {
+  padding: 6px 12px;
+  border-bottom: 1px solid #222;
+  color: #eee;
+  white-space: nowrap;
+}
+
+.csv-table tbody tr:hover {
+  background: #1f3460;
+}
+
+/* Sheet picker modal */
+.sheet-picker-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.sheet-picker-modal {
+  background: #16213e;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 20px;
+  min-width: 280px;
+  max-width: 400px;
+}
+
+.sheet-picker-modal h3 {
+  margin: 0 0 15px;
+  color: #61dafb;
+  font-size: 16px;
+}
+
+.sheet-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sheet-picker-btn {
+  padding: 10px 16px;
+  font-size: 14px;
+  background: #0f0f23;
+  color: #eee;
+  border: 1px solid #333;
+  border-radius: 4px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.sheet-picker-btn:hover {
+  background: #1f3460;
+  border-color: #0061FF;
+}

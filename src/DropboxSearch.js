@@ -1,6 +1,50 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import * as XLSX from 'xlsx';
 
 const APP_KEY = process.env.REACT_APP_DROPBOX_APP_KEY;
+
+// CSV parser that handles quoted fields, commas inside quotes, and escaped quotes
+function parseCsv(text) {
+  const result = [];
+  let remaining = text.trim();
+  while (remaining.length > 0) {
+    const { cells, rest } = parseCsvRow(remaining);
+    result.push(cells);
+    remaining = rest;
+  }
+  return result;
+}
+
+function parseCsvRow(text) {
+  const cells = [];
+  let i = 0;
+  while (i < text.length) {
+    if (text[i] === '\n') { i++; break; }
+    if (text[i] === '\r') { i++; if (text[i] === '\n') i++; break; }
+    if (text[i] === '"') {
+      i++;
+      let cell = '';
+      while (i < text.length) {
+        if (text[i] === '"') {
+          if (text[i + 1] === '"') { cell += '"'; i += 2; }
+          else { i++; break; }
+        } else { cell += text[i]; i++; }
+      }
+      cells.push(cell);
+      if (text[i] === ',') i++;
+      else if (text[i] === '\r' || text[i] === '\n') { if (text[i] === '\r') i++; if (text[i] === '\n') i++; break; }
+    } else {
+      let cell = '';
+      while (i < text.length && text[i] !== ',' && text[i] !== '\n' && text[i] !== '\r') {
+        cell += text[i]; i++;
+      }
+      cells.push(cell);
+      if (text[i] === ',') i++;
+      else { if (text[i] === '\r') i++; if (text[i] === '\n') i++; break; }
+    }
+  }
+  return { cells, rest: text.slice(i) };
+}
 const REDIRECT_URI = window.location.origin;
 
 // PKCE helpers using crypto.subtle
@@ -41,6 +85,11 @@ function DropboxSearch() {
   const [folderFiles, setFolderFiles] = useState([]);
   const [folderLoading, setFolderLoading] = useState(false);
   const [renameValue, setRenameValue] = useState('');
+  const [currentFileMimeType, setCurrentFileMimeType] = useState('');
+  const [sheetPickerOpen, setSheetPickerOpen] = useState(false);
+  const [sheetNames, setSheetNames] = useState([]);
+  const [pendingWorkbook, setPendingWorkbook] = useState(null);
+  const [pendingFileName, setPendingFileName] = useState('');
 
   // Handle OAuth redirect on mount
   useEffect(() => {
@@ -105,10 +154,15 @@ function DropboxSearch() {
       setFileContent('');
       setCurrentFileName('');
       setCurrentFilePath('');
+      setCurrentFileMimeType('');
       setIsEditMode(false);
       setEditContent('');
       setFolderPath('');
       setFolderFiles([]);
+      setSheetPickerOpen(false);
+      setPendingWorkbook(null);
+      setPendingFileName('');
+      setSheetNames([]);
       setStatus('Signed out');
     }
   };
@@ -264,10 +318,25 @@ function DropboxSearch() {
     await handleFileClick(filePath, fileName);
   };
 
+  const pickSheet = (sheetName) => {
+    const sheet = pendingWorkbook.Sheets[sheetName];
+    const csv = XLSX.utils.sheet_to_csv(sheet);
+    setFileContent(csv);
+    setCurrentFileName(`${pendingFileName} [${sheetName}]`);
+    setCurrentFileMimeType('spreadsheet');
+    setSheetPickerOpen(false);
+    setPendingWorkbook(null);
+    setPendingFileName('');
+    setSheetNames([]);
+    setStatus(`Loaded sheet "${sheetName}"`);
+  };
+
   const handleFileClick = async (filePath, fileName) => {
     setStatus(`Fetching ${fileName}...`);
 
     try {
+      const isXlsx = /\.xlsx?$/i.test(fileName);
+
       const response = await fetch('https://content.dropboxapi.com/2/files/download', {
         method: 'POST',
         headers: {
@@ -278,19 +347,48 @@ function DropboxSearch() {
 
       if (!response.ok) throw new Error('Download failed');
 
-      const content = await response.text();
+      if (isXlsx) {
+        const arrayBuffer = await response.arrayBuffer();
+        const workbook = XLSX.read(new Uint8Array(arrayBuffer), { type: 'array' });
+        const names = workbook.SheetNames;
 
-      if (outputMode === 'clipboard') {
-        await navigator.clipboard.writeText(content);
-        setStatus(`Copied "${fileName}" to clipboard`);
+        if (names.length > 1) {
+          setPendingWorkbook(workbook);
+          setPendingFileName(fileName);
+          setSheetNames(names);
+          setSheetPickerOpen(true);
+          setCurrentFilePath(filePath);
+          setRenameValue(fileName);
+          setIsEditMode(false);
+          setEditContent('');
+          setStatus(`"${fileName}" has ${names.length} sheets — pick one`);
+        } else {
+          const csv = XLSX.utils.sheet_to_csv(workbook.Sheets[names[0]]);
+          setFileContent(csv);
+          setCurrentFileName(fileName);
+          setCurrentFilePath(filePath);
+          setCurrentFileMimeType('spreadsheet');
+          setRenameValue(fileName);
+          setIsEditMode(false);
+          setEditContent('');
+          setStatus(`Loaded "${fileName}"`);
+        }
       } else {
-        setFileContent(content);
-        setCurrentFileName(fileName);
-        setCurrentFilePath(filePath);
-        setRenameValue(fileName);
-        setIsEditMode(false);
-        setEditContent('');
-        setStatus(`Loaded "${fileName}"`);
+        const content = await response.text();
+
+        if (outputMode === 'clipboard') {
+          await navigator.clipboard.writeText(content);
+          setStatus(`Copied "${fileName}" to clipboard`);
+        } else {
+          setFileContent(content);
+          setCurrentFileName(fileName);
+          setCurrentFilePath(filePath);
+          setCurrentFileMimeType('text');
+          setRenameValue(fileName);
+          setIsEditMode(false);
+          setEditContent('');
+          setStatus(`Loaded "${fileName}"`);
+        }
       }
     } catch (error) {
       setStatus('Error: ' + error.message);
@@ -656,6 +754,7 @@ function DropboxSearch() {
                         setFileContent('');
                         setCurrentFileName('');
                         setCurrentFilePath('');
+                        setCurrentFileMimeType('');
                         setIsEditMode(false);
                         setEditContent('');
                       }}
@@ -673,12 +772,48 @@ function DropboxSearch() {
                     value={editContent}
                     onChange={(e) => setEditContent(e.target.value)}
                   />
+                ) : currentFileMimeType === 'spreadsheet' ? (
+                  <div className="csv-table-wrapper">
+                    <table className="csv-table">
+                      <thead>
+                        <tr>
+                          {(parseCsv(fileContent)[0] || []).map((header, i) => (
+                            <th key={i}>{header}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {parseCsv(fileContent).slice(1).map((row, ri) => (
+                          <tr key={ri}>
+                            {row.map((cell, ci) => (
+                              <td key={ci}>{cell}</td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 ) : (
                   <pre>{fileContent}</pre>
                 )}
               </div>
             )}
           </div>
+
+          {sheetPickerOpen && (
+            <div className="sheet-picker-overlay" onClick={() => setSheetPickerOpen(false)}>
+              <div className="sheet-picker-modal" onClick={(e) => e.stopPropagation()}>
+                <h3>Select a Sheet</h3>
+                <div className="sheet-picker-list">
+                  {sheetNames.map((name) => (
+                    <button key={name} className="sheet-picker-btn" onClick={() => pickSheet(name)}>
+                      {name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
