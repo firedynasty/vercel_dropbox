@@ -1,0 +1,12 @@
+Summary 02/08
+
+1. Added XLSX spreadsheet file support using SheetJS library
+   - Detects .xlsx/.xls files and downloads as binary (arrayBuffer)
+   - Parses workbooks with XLSX.read() and converts sheets to CSV
+   - Renders spreadsheet data in a scrollable HTML table with sticky headers
+   - Multi-sheet workbooks display a sheet picker modal
+
+2. Added cell copy on row click with Cell 2 / Cell 3 toggle
+   - Radio buttons to choose between copying column 2 or column 3
+   - Click any row in the spreadsheet table to copy the selected cell to clipboard
+   - Status bar shows confirmation of copied content

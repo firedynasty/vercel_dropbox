@@ -90,6 +90,7 @@ function DropboxSearch() {
   const [sheetNames, setSheetNames] = useState([]);
   const [pendingWorkbook, setPendingWorkbook] = useState(null);
   const [pendingFileName, setPendingFileName] = useState('');
+  const [copyCellIndex, setCopyCellIndex] = useState(1);
 
   // Handle OAuth redirect on mount
   useEffect(() => {
@@ -766,6 +767,30 @@ function DropboxSearch() {
                     </button>
                   </div>
                 </div>
+                {currentFileMimeType === 'spreadsheet' && !isEditMode && (
+                  <div className="copy-cell-toggle">
+                    <label>
+                      <input
+                        type="radio"
+                        name="copyCell"
+                        value="1"
+                        checked={copyCellIndex === 1}
+                        onChange={() => setCopyCellIndex(1)}
+                      />
+                      Cell 2
+                    </label>
+                    <label>
+                      <input
+                        type="radio"
+                        name="copyCell"
+                        value="2"
+                        checked={copyCellIndex === 2}
+                        onChange={() => setCopyCellIndex(2)}
+                      />
+                      Cell 3
+                    </label>
+                  </div>
+                )}
                 {isEditMode ? (
                   <textarea
                     className="edit-textarea"
@@ -784,7 +809,11 @@ function DropboxSearch() {
                       </thead>
                       <tbody>
                         {parseCsv(fileContent).slice(1).map((row, ri) => (
-                          <tr key={ri}>
+                          <tr key={ri} onClick={async () => {
+                            const cellText = row[copyCellIndex] || '';
+                            await navigator.clipboard.writeText(cellText);
+                            setStatus(`Copied "${cellText.length > 40 ? cellText.substring(0, 40) + '...' : cellText}" to clipboard`);
+                          }}>
                             {row.map((cell, ci) => (
                               <td key={ci}>{cell}</td>
                             ))}

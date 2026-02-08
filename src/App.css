@@ -477,6 +477,29 @@
   overflow-y: auto;
 }
 
+/* Copy cell toggle */
+.copy-cell-toggle {
+  display: flex;
+  gap: 10px;
+  padding: 6px 15px;
+  color: #ccc;
+  font-size: 12px;
+  background: #0f0f23;
+  border-bottom: 1px solid #333;
+}
+
+.copy-cell-toggle label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.copy-cell-toggle input[type="radio"] {
+  accent-color: #0061FF;
+  cursor: pointer;
+}
+
 /* Spreadsheet table */
 .csv-table-wrapper {
   max-height: 70vh;
@@ -506,6 +529,10 @@
   border-bottom: 1px solid #222;
   color: #eee;
   white-space: nowrap;
+}
+
+.csv-table tbody tr {
+  cursor: pointer;
 }
 
 .csv-table tbody tr:hover {
