@@ -430,6 +430,44 @@ function DropboxSearch() {
     }
   };
 
+  const deleteFile = async () => {
+    if (!currentFilePath || !accessToken) return;
+    const code = window.prompt(`Type 1234 to delete "${currentFileName}"`);
+    if (code !== '1234') {
+      if (code !== null) setStatus('Delete cancelled — incorrect code');
+      return;
+    }
+
+    setStatus(`Deleting "${currentFileName}"...`);
+    try {
+      const response = await fetch('https://api.dropboxapi.com/2/files/delete_v2', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ path: currentFilePath }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error_summary || `HTTP ${response.status}`);
+      }
+
+      const deletedName = currentFileName;
+      setFileContent('');
+      setCurrentFileName('');
+      setCurrentFilePath('');
+      setRenameValue('');
+      setIsEditMode(false);
+      setEditContent('');
+      setStatus(`Deleted "${deletedName}"`);
+      if (folderPath) await loadFolder(folderPath);
+    } catch (error) {
+      setStatus('Error deleting: ' + error.message);
+    }
+  };
+
   // Determine what to show in the sidebar list
   const sidebarItems = folderPath ? folderFiles : results;
   const showBackLink = !!folderPath;
@@ -623,6 +661,9 @@ function DropboxSearch() {
                       }}
                     >
                       Clear
+                    </button>
+                    <button className="delete-btn" onClick={deleteFile}>
+                      Delete
                     </button>
                   </div>
                 </div>
