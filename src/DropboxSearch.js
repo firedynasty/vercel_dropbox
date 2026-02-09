@@ -511,6 +511,63 @@ function DropboxSearch() {
     }
   };
 
+  const appendRowFromClipboard = async () => {
+    if (!currentFilePath || !accessToken || !activeWorkbook) return;
+
+    const cell1 = window.prompt('Enter cell 1 value:');
+    if (cell1 === null || cell1.trim() === '') return;
+
+    let cell2 = '';
+    try {
+      cell2 = await navigator.clipboard.readText();
+    } catch (e) {
+      // clipboard empty or denied
+    }
+
+    if (!cell2.trim()) {
+      setStatus('Clipboard is empty — no row added.');
+      return;
+    }
+
+    const rows = parseCsv(fileContent);
+    rows.push([cell1, cell2]);
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    const newCsv = XLSX.utils.sheet_to_csv(ws);
+
+    setFileContent(newCsv);
+    activeWorkbook.Sheets[activeSheetName] = ws;
+
+    setStatus(`Saving "${currentFileName}"...`);
+    try {
+      const xlsxArray = XLSX.write(activeWorkbook, { bookType: 'xlsx', type: 'array' });
+      const body = new Uint8Array(xlsxArray);
+
+      const response = await fetch('https://content.dropboxapi.com/2/files/upload', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Dropbox-API-Arg': JSON.stringify({
+            path: currentFilePath,
+            mode: 'overwrite',
+            mute: true,
+          }),
+          'Content-Type': 'application/octet-stream',
+        },
+        body: body,
+      });
+
+      if (response.ok) {
+        setStatus(`Appended row and saved "${currentFileName}"`);
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error_summary || `HTTP ${response.status}`);
+      }
+    } catch (error) {
+      setStatus('Error saving: ' + error.message);
+    }
+  };
+
   const renameFile = async () => {
     if (!renameValue.trim() || renameValue === currentFileName || !currentFilePath || !accessToken) return;
     const parentDir = currentFilePath.substring(0, currentFilePath.lastIndexOf('/'));
@@ -810,6 +867,7 @@ function DropboxSearch() {
                       />
                       Cell 3
                     </label>
+                    <button onClick={appendRowFromClipboard}>+ Row</button>
                   </div>
                 )}
                 {isEditMode ? (
