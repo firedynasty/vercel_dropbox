@@ -91,6 +91,8 @@ function DropboxSearch() {
   const [pendingWorkbook, setPendingWorkbook] = useState(null);
   const [pendingFileName, setPendingFileName] = useState('');
   const [copyCellIndex, setCopyCellIndex] = useState(1);
+  const [activeWorkbook, setActiveWorkbook] = useState(null);
+  const [activeSheetName, setActiveSheetName] = useState('');
 
   // Handle OAuth redirect on mount
   useEffect(() => {
@@ -164,6 +166,8 @@ function DropboxSearch() {
       setPendingWorkbook(null);
       setPendingFileName('');
       setSheetNames([]);
+      setActiveWorkbook(null);
+      setActiveSheetName('');
       setStatus('Signed out');
     }
   };
@@ -325,6 +329,8 @@ function DropboxSearch() {
     setFileContent(csv);
     setCurrentFileName(`${pendingFileName} [${sheetName}]`);
     setCurrentFileMimeType('spreadsheet');
+    setActiveWorkbook(pendingWorkbook);
+    setActiveSheetName(sheetName);
     setSheetPickerOpen(false);
     setPendingWorkbook(null);
     setPendingFileName('');
@@ -369,6 +375,8 @@ function DropboxSearch() {
           setCurrentFileName(fileName);
           setCurrentFilePath(filePath);
           setCurrentFileMimeType('spreadsheet');
+          setActiveWorkbook(workbook);
+          setActiveSheetName(names[0]);
           setRenameValue(fileName);
           setIsEditMode(false);
           setEditContent('');
@@ -463,6 +471,17 @@ function DropboxSearch() {
     try {
       const contentToSave = isEditMode ? editContent : fileContent;
 
+      let body;
+      if (currentFileMimeType === 'spreadsheet' && activeWorkbook) {
+        const rows = parseCsv(contentToSave);
+        const ws = XLSX.utils.aoa_to_sheet(rows);
+        activeWorkbook.Sheets[activeSheetName] = ws;
+        const xlsxArray = XLSX.write(activeWorkbook, { bookType: 'xlsx', type: 'array' });
+        body = new Uint8Array(xlsxArray);
+      } else {
+        body = contentToSave;
+      }
+
       const response = await fetch('https://content.dropboxapi.com/2/files/upload', {
         method: 'POST',
         headers: {
@@ -474,7 +493,7 @@ function DropboxSearch() {
           }),
           'Content-Type': 'application/octet-stream',
         },
-        body: contentToSave,
+        body: body,
       });
 
       if (response.ok) {
@@ -758,6 +777,8 @@ function DropboxSearch() {
                         setCurrentFileMimeType('');
                         setIsEditMode(false);
                         setEditContent('');
+                        setActiveWorkbook(null);
+                        setActiveSheetName('');
                       }}
                     >
                       Clear
