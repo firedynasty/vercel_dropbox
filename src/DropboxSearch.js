@@ -514,7 +514,7 @@ function DropboxSearch() {
   const appendRowFromClipboard = async () => {
     if (!currentFilePath || !accessToken || !activeWorkbook) return;
 
-    const cell1 = window.prompt('Enter cell 1 value:');
+    const cell1 = window.prompt('Enter cell 1 value (clipboard will append to cell 2):');
     if (cell1 === null || cell1.trim() === '') return;
 
     let cell2 = '';
@@ -559,6 +559,51 @@ function DropboxSearch() {
 
       if (response.ok) {
         setStatus(`Appended row and saved "${currentFileName}"`);
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error_summary || `HTTP ${response.status}`);
+      }
+    } catch (error) {
+      setStatus('Error saving: ' + error.message);
+    }
+  };
+
+  const appendClipboardToTextFile = async () => {
+    if (!currentFilePath || !accessToken) return;
+
+    let clipboardText = '';
+    try {
+      clipboardText = await navigator.clipboard.readText();
+    } catch (e) {
+      // clipboard empty or denied
+    }
+
+    if (!clipboardText.trim()) {
+      setStatus('Clipboard is empty — nothing appended.');
+      return;
+    }
+
+    const newContent = fileContent + (fileContent.endsWith('\n') ? '' : '\n') + clipboardText;
+    setFileContent(newContent);
+
+    setStatus(`Saving "${currentFileName}"...`);
+    try {
+      const response = await fetch('https://content.dropboxapi.com/2/files/upload', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Dropbox-API-Arg': JSON.stringify({
+            path: currentFilePath,
+            mode: 'overwrite',
+            mute: true,
+          }),
+          'Content-Type': 'application/octet-stream',
+        },
+        body: newContent,
+      });
+
+      if (response.ok) {
+        setStatus(`Appended clipboard and saved "${currentFileName}"`);
       } else {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.error_summary || `HTTP ${response.status}`);
@@ -868,6 +913,11 @@ function DropboxSearch() {
                       Cell 3
                     </label>
                     <button onClick={appendRowFromClipboard}>+ Row</button>
+                  </div>
+                )}
+                {currentFileMimeType !== 'spreadsheet' && !isEditMode && fileContent && (
+                  <div className="copy-cell-toggle">
+                    <button onClick={appendClipboardToTextFile}>+ Append from Clipboard</button>
                   </div>
                 )}
                 {isEditMode ? (
