@@ -571,6 +571,9 @@ function DropboxSearch() {
   const appendClipboardToTextFile = async () => {
     if (!currentFilePath || !accessToken) return;
 
+    const displayText = window.prompt('Enter text to prepend before clipboard content:');
+    if (displayText === null) return;
+
     let clipboardText = '';
     try {
       clipboardText = await navigator.clipboard.readText();
@@ -583,7 +586,10 @@ function DropboxSearch() {
       return;
     }
 
-    const newContent = fileContent + (fileContent.endsWith('\n') ? '' : '\n') + clipboardText;
+    const appendPart = displayText.trim()
+      ? displayText + '\n' + clipboardText
+      : clipboardText;
+    const newContent = fileContent + (fileContent.endsWith('\n') ? '' : '\n') + appendPart;
     setFileContent(newContent);
 
     setStatus(`Saving "${currentFileName}"...`);
