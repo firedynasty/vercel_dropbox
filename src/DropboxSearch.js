@@ -93,6 +93,7 @@ function DropboxSearch() {
   const [copyCellIndex, setCopyCellIndex] = useState(1);
   const [activeWorkbook, setActiveWorkbook] = useState(null);
   const [activeSheetName, setActiveSheetName] = useState('');
+  const [showSidebar, setShowSidebar] = useState(true);
 
   // Handle OAuth redirect on mount
   useEffect(() => {
@@ -726,7 +727,14 @@ function DropboxSearch() {
 
       {accessToken && (
         <div className="dropbox-layout">
+          {showSidebar && (
           <div className="dropbox-sidebar">
+            <div className="sidebar-header">
+              <span className="sidebar-header-title">Files</span>
+              <button className="sidebar-close-btn" onClick={() => setShowSidebar(false)} title="Close sidebar">
+                &times;
+              </button>
+            </div>
             <div className="sidebar-search">
               <div className="search-box">
                 <input
@@ -797,8 +805,14 @@ function DropboxSearch() {
               ))}
             </div>
           </div>
+          )}
 
           <div className="dropbox-main">
+            {!showSidebar && (
+              <button className="hamburger-btn" onClick={() => setShowSidebar(true)} title="Open sidebar">
+                &#9776;
+              </button>
+            )}
             {status && <div className="status">{status}</div>}
 
             <div className="toggle-group">
