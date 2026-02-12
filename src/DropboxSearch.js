@@ -303,12 +303,19 @@ function DropboxSearch() {
   }, [searchQuery, accessToken]);
 
   const handleSearch = useCallback(() => {
+    const q = searchQuery.trim();
+    if (q.startsWith('/')) {
+      // Direct path navigation — open the folder directly
+      setResults([]);
+      loadFolder(q.replace(/\/+$/, '') || '');
+      return;
+    }
     if (searchMode === 'file') {
       searchFiles();
     } else {
       searchFolders();
     }
-  }, [searchMode, searchFiles, searchFolders]);
+  }, [searchMode, searchFiles, searchFolders, searchQuery, loadFolder]);
 
   const handleKeyPress = (e) => {
     if (e.key === 'Enter') {
