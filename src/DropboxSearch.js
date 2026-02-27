@@ -99,6 +99,7 @@ function DropboxSearch() {
   const [activeWorkbook, setActiveWorkbook] = useState(null);
   const [activeSheetName, setActiveSheetName] = useState('');
   const [showSidebar, setShowSidebar] = useState(true);
+  const [contentFontSize, setContentFontSize] = useState(14);
 
   // Handle OAuth redirect on mount
   useEffect(() => {
@@ -867,16 +868,10 @@ function DropboxSearch() {
                       Copy
                     </button>
                     <button
-                      className="paste-btn"
-                      onClick={async () => {
-                        const text = await navigator.clipboard.readText();
-                        setEditContent(text);
-                        setFileContent(text);
-                        setIsEditMode(true);
-                        setStatus(`Pasted clipboard into "${currentFileName}"`);
-                      }}
+                      className="font-increase-btn"
+                      onClick={() => setContentFontSize((s) => s + 2)}
                     >
-                      Paste
+                      + Font
                     </button>
                     <button
                       className="edit-btn"
@@ -954,6 +949,7 @@ function DropboxSearch() {
                     className="edit-textarea"
                     value={editContent}
                     onChange={(e) => setEditContent(e.target.value)}
+                    style={{ fontSize: contentFontSize }}
                   />
                 ) : currentFileMimeType === 'spreadsheet' ? (
                   <div className="csv-table-wrapper">
@@ -981,7 +977,7 @@ function DropboxSearch() {
                     </table>
                   </div>
                 ) : (
-                  <pre>{fileContent}</pre>
+                  <pre style={{ fontSize: contentFontSize }}>{fileContent}</pre>
                 )}
               </div>
             )}

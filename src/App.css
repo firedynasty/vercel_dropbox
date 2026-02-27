@@ -457,7 +457,7 @@
   background: #c82333;
 }
 
-.file-content-display .paste-btn {
+.file-content-display .font-increase-btn {
   padding: 6px 12px;
   font-size: 12px;
   background: #e67e22;
@@ -467,7 +467,7 @@
   cursor: pointer;
 }
 
-.file-content-display .paste-btn:hover {
+.file-content-display .font-increase-btn:hover {
   background: #d35400;
 }
 
