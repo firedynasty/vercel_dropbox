@@ -942,6 +942,11 @@ function DropboxSearch() {
                   <div className="copy-cell-toggle">
                     <button onClick={appendClipboardToTextFile}>+ Clipboard</button>
                     <button onClick={appendPromptToTextFile}>+ Prompt</button>
+                    <button onClick={() => {
+                      const match = fileContent.match(/https?:\/\/[^\s<>"')\]]+/);
+                      if (match) window.open(match[0], '_blank');
+                      else setStatus('No link found in file');
+                    }}>Open Link in File</button>
                   </div>
                 )}
                 {isEditMode ? (
