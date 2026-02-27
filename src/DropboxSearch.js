@@ -85,7 +85,7 @@ function DropboxSearch() {
   const [isEditMode, setIsEditMode] = useState(false);
   const [editContent, setEditContent] = useState('');
   const [saving, setSaving] = useState(false);
-  const [searchMode, setSearchMode] = useState('folder');
+  const [searchMode] = useState('folder');
   const [folderPath, setFolderPath] = useState('');
   const [folderFiles, setFolderFiles] = useState([]);
   const [folderLoading, setFolderLoading] = useState(false);
