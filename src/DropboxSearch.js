@@ -89,7 +89,7 @@ function DropboxSearch() {
   const [folderPath, setFolderPath] = useState('');
   const [folderFiles, setFolderFiles] = useState([]);
   const [folderLoading, setFolderLoading] = useState(false);
-  const [renameValue, setRenameValue] = useState('');
+
   const [currentFileMimeType, setCurrentFileMimeType] = useState('');
   const [sheetPickerOpen, setSheetPickerOpen] = useState(false);
   const [sheetNames, setSheetNames] = useState([]);
@@ -378,7 +378,7 @@ function DropboxSearch() {
           setSheetNames(names);
           setSheetPickerOpen(true);
           setCurrentFilePath(filePath);
-          setRenameValue(fileName);
+
           setIsEditMode(false);
           setEditContent('');
           setStatus(`"${fileName}" has ${names.length} sheets — pick one`);
@@ -390,7 +390,7 @@ function DropboxSearch() {
           setCurrentFileMimeType('spreadsheet');
           setActiveWorkbook(workbook);
           setActiveSheetName(names[0]);
-          setRenameValue(fileName);
+
           setIsEditMode(false);
           setEditContent('');
           setStatus(`Loaded "${fileName}"`);
@@ -406,7 +406,7 @@ function DropboxSearch() {
           setCurrentFileName(fileName);
           setCurrentFilePath(filePath);
           setCurrentFileMimeType('text');
-          setRenameValue(fileName);
+
           setIsEditMode(false);
           setEditContent('');
           setStatus(`Loaded "${fileName}"`);
@@ -633,11 +633,14 @@ function DropboxSearch() {
   };
 
   const renameFile = async () => {
-    if (!renameValue.trim() || renameValue === currentFileName || !currentFilePath || !accessToken) return;
-    const parentDir = currentFilePath.substring(0, currentFilePath.lastIndexOf('/'));
-    const newPath = `${parentDir}/${renameValue}`;
+    if (!currentFilePath || !accessToken) return;
+    const newName = window.prompt('Rename file to:', currentFileName);
+    if (!newName || !newName.trim() || newName.trim() === currentFileName) return;
 
-    setStatus(`Renaming to "${renameValue}"...`);
+    const parentDir = currentFilePath.substring(0, currentFilePath.lastIndexOf('/'));
+    const newPath = `${parentDir}/${newName.trim()}`;
+
+    setStatus(`Renaming to "${newName.trim()}"...`);
     try {
       const response = await fetch('https://api.dropboxapi.com/2/files/move_v2', {
         method: 'POST',
@@ -661,7 +664,6 @@ function DropboxSearch() {
       const meta = data.metadata;
       setCurrentFileName(meta.name);
       setCurrentFilePath(meta.path_lower || meta.path_display);
-      setRenameValue(meta.name);
       setStatus(`Renamed to "${meta.name}"`);
       if (folderPath) await loadFolder(folderPath);
     } catch (error) {
@@ -697,7 +699,6 @@ function DropboxSearch() {
       setFileContent('');
       setCurrentFileName('');
       setCurrentFilePath('');
-      setRenameValue('');
       setIsEditMode(false);
       setEditContent('');
       setStatus(`Deleted "${deletedName}"`);
@@ -851,12 +852,7 @@ function DropboxSearch() {
               <div className="file-content-display">
                 <div className="content-header">
                   <div className="rename-row">
-                    <input
-                      className="rename-input"
-                      value={renameValue}
-                      onChange={(e) => setRenameValue(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter') renameFile(); }}
-                    />
+                    <span className="rename-label" style={{ flex: 1, fontWeight: 'bold', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{currentFileName}</span>
                     <button className="rename-btn" onClick={renameFile}>Rename</button>
                   </div>
                   <div className="content-actions">
