@@ -1,0 +1,36 @@
+How to Edit the Folder Presets Dropdown
+=======================================
+
+The folder presets dropdown is configured in:
+
+  src/DropboxSearch.js  (line 6)
+
+It looks like this:
+
+  const FOLDER_PRESETS = {
+    'Chess Reports': '/chess/reports',
+    'Literature': '/literature/papers',
+  };
+
+Each entry is:
+
+  'Display Name': '/dropbox/folder/path',
+
+  - Display Name = what you see in the dropdown
+  - Path = the Dropbox folder path it navigates to (must start with /)
+
+To add a new folder preset:
+
+  const FOLDER_PRESETS = {
+    'Chess Reports': '/chess/reports',
+    'Literature': '/literature/papers',
+    'My Notes': '/notes/daily',
+  };
+
+To remove one, just delete that line.
+
+To rename a label, change the text before the colon:
+
+  'Daily Notes': '/notes/daily',
+
+The path must match an existing Dropbox folder path exactly (case-insensitive).
