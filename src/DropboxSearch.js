@@ -638,10 +638,13 @@ function DropboxSearch() {
     const newName = window.prompt('Rename file to:', currentFileName);
     if (!newName || !newName.trim() || newName.trim() === currentFileName) return;
 
-    const parentDir = currentFilePath.substring(0, currentFilePath.lastIndexOf('/'));
-    const newPath = `${parentDir}/${newName.trim()}`;
+    let finalName = newName.trim();
+    if (!finalName.includes('.')) finalName += '.md';
 
-    setStatus(`Renaming to "${newName.trim()}"...`);
+    const parentDir = currentFilePath.substring(0, currentFilePath.lastIndexOf('/'));
+    const newPath = `${parentDir}/${finalName}`;
+
+    setStatus(`Renaming to "${finalName}"...`);
     try {
       const response = await fetch('https://api.dropboxapi.com/2/files/move_v2', {
         method: 'POST',
