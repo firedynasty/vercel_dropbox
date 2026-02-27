@@ -581,28 +581,8 @@ function DropboxSearch() {
     }
   };
 
-  const appendClipboardToTextFile = async () => {
-    if (!currentFilePath || !accessToken) return;
-
-    const displayText = window.prompt('Enter text to prepend before clipboard content:');
-    if (displayText === null) return;
-
-    let clipboardText = '';
-    try {
-      clipboardText = await navigator.clipboard.readText();
-    } catch (e) {
-      // clipboard empty or denied
-    }
-
-    if (!clipboardText.trim()) {
-      setStatus('Clipboard is empty — nothing appended.');
-      return;
-    }
-
-    const appendPart = displayText.trim()
-      ? displayText + '\n' + clipboardText
-      : clipboardText;
-    const newContent = fileContent + (fileContent.endsWith('\n') ? '' : '\n') + appendPart;
+  const appendAndSave = async (textToAppend, label) => {
+    const newContent = fileContent + (fileContent.endsWith('\n') ? '' : '\n') + textToAppend;
     setFileContent(newContent);
 
     setStatus(`Saving "${currentFileName}"...`);
@@ -622,7 +602,7 @@ function DropboxSearch() {
       });
 
       if (response.ok) {
-        setStatus(`Appended clipboard and saved "${currentFileName}"`);
+        setStatus(`${label} and saved "${currentFileName}"`);
       } else {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.error_summary || `HTTP ${response.status}`);
@@ -630,6 +610,26 @@ function DropboxSearch() {
     } catch (error) {
       setStatus('Error saving: ' + error.message);
     }
+  };
+
+  const appendClipboardToTextFile = async () => {
+    if (!currentFilePath || !accessToken) return;
+    let clipboardText = '';
+    try {
+      clipboardText = await navigator.clipboard.readText();
+    } catch (e) { /* clipboard empty or denied */ }
+    if (!clipboardText.trim()) {
+      setStatus('Clipboard is empty — nothing appended.');
+      return;
+    }
+    await appendAndSave(clipboardText, 'Appended clipboard');
+  };
+
+  const appendPromptToTextFile = async () => {
+    if (!currentFilePath || !accessToken) return;
+    const text = window.prompt('Enter text to append:');
+    if (!text || !text.trim()) return;
+    await appendAndSave(text, 'Appended text');
   };
 
   const renameFile = async () => {
@@ -940,7 +940,8 @@ function DropboxSearch() {
                 )}
                 {currentFileMimeType !== 'spreadsheet' && !isEditMode && fileContent && (
                   <div className="copy-cell-toggle">
-                    <button onClick={appendClipboardToTextFile}>+ Append from Clipboard</button>
+                    <button onClick={appendClipboardToTextFile}>+ Clipboard</button>
+                    <button onClick={appendPromptToTextFile}>+ Prompt</button>
                   </div>
                 )}
                 {isEditMode ? (
