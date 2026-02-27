@@ -3,6 +3,11 @@ import * as XLSX from 'xlsx';
 
 const APP_KEY = process.env.REACT_APP_DROPBOX_APP_KEY;
 
+const FOLDER_PRESETS = {
+  'Chess Reports': '/chess/reports',
+  'Literature': '/literature/papers',
+};
+
 // CSV parser that handles quoted fields, commas inside quotes, and escaped quotes
 function parseCsv(text) {
   const result = [];
@@ -80,7 +85,7 @@ function DropboxSearch() {
   const [isEditMode, setIsEditMode] = useState(false);
   const [editContent, setEditContent] = useState('');
   const [saving, setSaving] = useState(false);
-  const [searchMode, setSearchMode] = useState('file');
+  const [searchMode, setSearchMode] = useState('folder');
   const [folderPath, setFolderPath] = useState('');
   const [folderFiles, setFolderFiles] = useState([]);
   const [folderLoading, setFolderLoading] = useState(false);
@@ -743,6 +748,23 @@ function DropboxSearch() {
               </button>
             </div>
             <div className="sidebar-search">
+              <div className="folder-presets">
+                <select
+                  onChange={(e) => {
+                    const path = e.target.value;
+                    if (!path) return;
+                    setSearchQuery(path);
+                    setTimeout(() => loadFolder(path), 500);
+                  }}
+                  defaultValue=""
+                  style={{ width: '100%', padding: '6px 8px', marginBottom: '6px', borderRadius: '4px', border: '1px solid #555', background: '#2a2a3e', color: '#eee', fontSize: '13px', cursor: 'pointer' }}
+                >
+                  <option value="">-- Select folder --</option>
+                  {Object.entries(FOLDER_PRESETS).map(([label, path]) => (
+                    <option key={path} value={path}>{label}</option>
+                  ))}
+                </select>
+              </div>
               <div className="search-box">
                 <input
                   type="text"
@@ -755,28 +777,6 @@ function DropboxSearch() {
                 <button onClick={handleSearch} disabled={loading || folderLoading}>
                   {loading || folderLoading ? '...' : 'Search'}
                 </button>
-              </div>
-              <div className="search-mode-toggle">
-                <label>
-                  <input
-                    type="radio"
-                    name="searchMode"
-                    value="file"
-                    checked={searchMode === 'file'}
-                    onChange={(e) => setSearchMode(e.target.value)}
-                  />
-                  Files
-                </label>
-                <label>
-                  <input
-                    type="radio"
-                    name="searchMode"
-                    value="folder"
-                    checked={searchMode === 'folder'}
-                    onChange={(e) => setSearchMode(e.target.value)}
-                  />
-                  Folders
-                </label>
               </div>
             </div>
 
