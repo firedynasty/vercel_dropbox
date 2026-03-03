@@ -244,11 +244,15 @@ function DropboxSearch() {
         name: entry.name,
         path: entry.path_lower || entry.path_display,
         isFolder: entry['.tag'] === 'folder',
+        modified: entry.server_modified || '',
       }));
 
-      // Sort: folders first, then files, alphabetical within each
+      // Sort: folders first, then files; by last modified ascending within each
       entries.sort((a, b) => {
         if (a.isFolder !== b.isFolder) return a.isFolder ? -1 : 1;
+        if (a.modified && b.modified) return a.modified.localeCompare(b.modified);
+        if (a.modified) return 1;
+        if (b.modified) return -1;
         return a.name.localeCompare(b.name);
       });
 
