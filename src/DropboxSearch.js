@@ -834,30 +834,7 @@ function DropboxSearch() {
             )}
             {status && <div className="status">{status}</div>}
 
-            <div className="toggle-group">
-              <div className="output-mode-selector">
-                <label>
-                  <input
-                    type="radio"
-                    name="outputMode"
-                    value="clipboard"
-                    checked={outputMode === 'clipboard'}
-                    onChange={(e) => setOutputMode(e.target.value)}
-                  />
-                  Copy to Clipboard
-                </label>
-                <label>
-                  <input
-                    type="radio"
-                    name="outputMode"
-                    value="div"
-                    checked={outputMode === 'div'}
-                    onChange={(e) => setOutputMode(e.target.value)}
-                  />
-                  View/Edit
-                </label>
-              </div>
-            </div>
+            {/* output mode is always 'div' (View/Edit) — toggle hidden for more viewspace */}
 
             {outputMode === 'div' && fileContent && (
               <div className="file-content-display">
