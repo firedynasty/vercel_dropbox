@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import * as XLSX from 'xlsx';
+import { marked } from 'marked';
 
 const APP_KEY = process.env.REACT_APP_DROPBOX_APP_KEY;
 
@@ -100,6 +101,8 @@ function DropboxSearch() {
   const [activeSheetName, setActiveSheetName] = useState('');
   const [showSidebar, setShowSidebar] = useState(true);
   const [contentFontSize, setContentFontSize] = useState(14);
+  const [markdownEnabled, setMarkdownEnabled] = useState(false);
+  const markdownRef = useRef(null);
 
   // Handle OAuth redirect on mount
   useEffect(() => {
@@ -880,6 +883,15 @@ function DropboxSearch() {
                     >
                       + Font
                     </button>
+                    {currentFileName.toLowerCase().endsWith('.md') && (
+                      <button
+                        className={`markdown-toggle-btn ${markdownEnabled ? 'active' : ''}`}
+                        onClick={() => setMarkdownEnabled((prev) => !prev)}
+                        title={markdownEnabled ? 'Show raw text' : 'Render markdown'}
+                      >
+                        {markdownEnabled ? 'MD' : '{ }'}
+                      </button>
+                    )}
                     <button
                       className="edit-btn"
                       onClick={toggleEditMode}
@@ -983,6 +995,13 @@ function DropboxSearch() {
                       </tbody>
                     </table>
                   </div>
+                ) : markdownEnabled && currentFileName.toLowerCase().endsWith('.md') ? (
+                  <div
+                    className="preview-markdown"
+                    style={{ fontSize: contentFontSize }}
+                    ref={markdownRef}
+                    dangerouslySetInnerHTML={{ __html: marked.parse(fileContent) }}
+                  />
                 ) : (
                   <pre style={{ fontSize: contentFontSize }}>{fileContent}</pre>
                 )}
