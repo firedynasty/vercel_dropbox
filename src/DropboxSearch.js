@@ -79,7 +79,7 @@ function DropboxSearch() {
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
-  const [outputMode, setOutputMode] = useState('div');
+  const [outputMode] = useState('div');
   const [fileContent, setFileContent] = useState('');
   const [currentFileName, setCurrentFileName] = useState('');
   const [currentFilePath, setCurrentFilePath] = useState('');
