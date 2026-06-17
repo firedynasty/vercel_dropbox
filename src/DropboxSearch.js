@@ -104,6 +104,13 @@ function DropboxSearch() {
   const [markdownEnabled, setMarkdownEnabled] = useState(false);
   const markdownRef = useRef(null);
 
+  // Screenshots state
+  const [screenshotsMode, setScreenshotsMode] = useState(false);
+  const [screenshotsData, setScreenshotsData] = useState([]);
+  const [screenshotsQuery, setScreenshotsQuery] = useState('');
+  const [screenshotsLoading, setScreenshotsLoading] = useState(false);
+  const [screenshotsLoaded, setScreenshotsLoaded] = useState(false);
+
   // Handle OAuth redirect on mount
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -333,6 +340,40 @@ function DropboxSearch() {
   const handleKeyPress = (e) => {
     if (e.key === 'Enter') {
       handleSearch();
+    }
+  };
+
+  const loadScreenshots = useCallback(async () => {
+    if (screenshotsLoaded) return;
+    setScreenshotsLoading(true);
+    setStatus('Loading screenshots...');
+    try {
+      const response = await fetch('/api/screenshots');
+      if (!response.ok) throw new Error('Failed to load screenshots');
+      const data = await response.json();
+      setScreenshotsData(data);
+      setScreenshotsLoaded(true);
+      setStatus(`Loaded ${data.length} screenshots`);
+    } catch (error) {
+      setStatus('Error loading screenshots: ' + error.message);
+    } finally {
+      setScreenshotsLoading(false);
+    }
+  }, [screenshotsLoaded]);
+
+  const filteredScreenshots = screenshotsQuery.trim()
+    ? screenshotsData.filter((img) =>
+        img.name.toLowerCase().includes(screenshotsQuery.trim().toLowerCase()) ||
+        img.folder.toLowerCase().includes(screenshotsQuery.trim().toLowerCase()) ||
+        img.path.toLowerCase().includes(screenshotsQuery.trim().toLowerCase())
+      )
+    : screenshotsData;
+
+  const toggleScreenshotsMode = async () => {
+    const entering = !screenshotsMode;
+    setScreenshotsMode(entering);
+    if (entering) {
+      await loadScreenshots();
     }
   };
 
@@ -738,18 +779,77 @@ function DropboxSearch() {
     <div className="dropbox-search">
       <div className="dropbox-header">
         <h1>Dropbox Search</h1>
-        {accessToken ? (
-          <button onClick={handleSignOut} className="sign-out-btn">
-            Sign Out
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button
+            onClick={toggleScreenshotsMode}
+            className={screenshotsMode ? 'sign-out-btn' : 'sign-in-btn'}
+            style={{ fontSize: '13px' }}
+          >
+            {screenshotsMode ? 'Back to Files' : 'Screenshots'}
           </button>
-        ) : (
-          <button onClick={handleSignIn} className="sign-in-btn">
-            Sign in with Dropbox
-          </button>
-        )}
+          {accessToken ? (
+            <button onClick={handleSignOut} className="sign-out-btn">
+              Sign Out
+            </button>
+          ) : (
+            <button onClick={handleSignIn} className="sign-in-btn">
+              Sign in with Dropbox
+            </button>
+          )}
+        </div>
       </div>
 
-      {accessToken && (
+      {screenshotsMode && (
+        <div style={{ padding: '16px' }}>
+          <div style={{ marginBottom: '12px', display: 'flex', gap: '8px' }}>
+            <input
+              type="text"
+              value={screenshotsQuery}
+              onChange={(e) => setScreenshotsQuery(e.target.value)}
+              placeholder="Search screenshots by name (e.g. claude1)..."
+              autoFocus
+              style={{
+                flex: 1, padding: '10px 14px', borderRadius: '6px',
+                border: '1px solid #555', background: '#2a2a3e', color: '#eee',
+                fontSize: '15px',
+              }}
+            />
+          </div>
+          {screenshotsLoading && <div className="status">Loading screenshots...</div>}
+          {status && !screenshotsLoading && <div className="status">{status}</div>}
+          {screenshotsQuery.trim() && (
+            <div style={{ color: '#aaa', marginBottom: '8px', fontSize: '13px' }}>
+              {filteredScreenshots.length} result(s) for "{screenshotsQuery.trim()}"
+            </div>
+          )}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+            gap: '12px',
+          }}>
+            {filteredScreenshots.map((img, idx) => (
+              <div key={idx} style={{
+                background: '#1e1e2e', borderRadius: '8px', overflow: 'hidden',
+                border: '1px solid #333',
+              }}>
+                <img
+                  src={img.url}
+                  alt={img.name}
+                  loading="lazy"
+                  style={{ width: '100%', display: 'block', cursor: 'pointer' }}
+                  onClick={() => window.open(img.url, '_blank')}
+                />
+                <div style={{ padding: '8px 10px' }}>
+                  <div style={{ fontWeight: 'bold', fontSize: '13px', color: '#eee' }}>{img.name}</div>
+                  <div style={{ fontSize: '11px', color: '#888' }}>{img.folder}/{img.file}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {!screenshotsMode && accessToken && (
         <div className="dropbox-layout">
           {showSidebar && (
           <div className="dropbox-sidebar">
