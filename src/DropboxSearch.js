@@ -110,6 +110,7 @@ function DropboxSearch() {
   const [screenshotsQuery, setScreenshotsQuery] = useState('');
   const [screenshotsLoading, setScreenshotsLoading] = useState(false);
   const [screenshotsLoaded, setScreenshotsLoaded] = useState(false);
+  const [screenshotModalIndex, setScreenshotModalIndex] = useState(-1);
 
   // Handle OAuth redirect on mount
   useEffect(() => {
@@ -376,6 +377,22 @@ function DropboxSearch() {
       await loadScreenshots();
     }
   };
+
+  // Keyboard navigation for screenshot modal
+  useEffect(() => {
+    if (screenshotModalIndex < 0) return;
+    const handleKey = (e) => {
+      if (e.key === 'ArrowRight') {
+        setScreenshotModalIndex((i) => (i + 1) % filteredScreenshots.length);
+      } else if (e.key === 'ArrowLeft') {
+        setScreenshotModalIndex((i) => (i - 1 + filteredScreenshots.length) % filteredScreenshots.length);
+      } else if (e.key === 'Escape') {
+        setScreenshotModalIndex(-1);
+      }
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [screenshotModalIndex, filteredScreenshots.length]);
 
   const handleSidebarItemClick = async (filePath, fileName, isFolder) => {
     if (isFolder) {
@@ -817,35 +834,103 @@ function DropboxSearch() {
           </div>
           {screenshotsLoading && <div className="status">Loading screenshots...</div>}
           {status && !screenshotsLoading && <div className="status">{status}</div>}
-          {screenshotsQuery.trim() && (
-            <div style={{ color: '#aaa', marginBottom: '8px', fontSize: '13px' }}>
-              {filteredScreenshots.length} result(s) for "{screenshotsQuery.trim()}"
+
+          {!screenshotsQuery.trim() && screenshotsLoaded && (
+            <div style={{ color: '#aaa', fontSize: '13px' }}>
+              {screenshotsData.length} screenshot(s) loaded. Type a name to search.
             </div>
           )}
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-            gap: '12px',
-          }}>
-            {filteredScreenshots.map((img, idx) => (
-              <div key={idx} style={{
-                background: '#1e1e2e', borderRadius: '8px', overflow: 'hidden',
-                border: '1px solid #333',
+
+          {screenshotsQuery.trim() && (
+            <>
+              <div style={{ color: '#aaa', marginBottom: '8px', fontSize: '13px' }}>
+                {filteredScreenshots.length} result(s) for &ldquo;{screenshotsQuery.trim()}&rdquo;
+              </div>
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+                gap: '12px',
               }}>
+                {filteredScreenshots.map((img, idx) => (
+                  <div key={idx} style={{
+                    background: '#1e1e2e', borderRadius: '8px', overflow: 'hidden',
+                    border: '1px solid #333', cursor: 'pointer',
+                  }} onClick={() => setScreenshotModalIndex(idx)}>
+                    <img
+                      src={img.url}
+                      alt={img.name}
+                      loading="lazy"
+                      style={{ width: '100%', display: 'block' }}
+                    />
+                    <div style={{ padding: '8px 10px' }}>
+                      <div style={{ fontWeight: 'bold', fontSize: '13px', color: '#eee' }}>{img.name}</div>
+                      <div style={{ fontSize: '11px', color: '#888' }}>{img.folder}/{img.file}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          {/* Screenshot modal */}
+          {screenshotModalIndex >= 0 && screenshotModalIndex < filteredScreenshots.length && (
+            <div
+              style={{
+                position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)',
+                zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}
+              onClick={() => setScreenshotModalIndex(-1)}
+            >
+              {/* Left arrow */}
+              {filteredScreenshots.length > 1 && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); setScreenshotModalIndex((screenshotModalIndex - 1 + filteredScreenshots.length) % filteredScreenshots.length); }}
+                  style={{
+                    position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)',
+                    background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff',
+                    fontSize: '2rem', padding: '12px 16px', cursor: 'pointer', borderRadius: '8px',
+                  }}
+                >&larr;</button>
+              )}
+
+              <div onClick={(e) => e.stopPropagation()} style={{ textAlign: 'center', maxWidth: '90vw', maxHeight: '90vh' }}>
                 <img
-                  src={img.url}
-                  alt={img.name}
-                  loading="lazy"
-                  style={{ width: '100%', display: 'block', cursor: 'pointer' }}
-                  onClick={() => window.open(img.url, '_blank')}
+                  src={filteredScreenshots[screenshotModalIndex].url}
+                  alt={filteredScreenshots[screenshotModalIndex].name}
+                  style={{ maxWidth: '85vw', maxHeight: '80vh', objectFit: 'contain', borderRadius: '4px' }}
                 />
-                <div style={{ padding: '8px 10px' }}>
-                  <div style={{ fontWeight: 'bold', fontSize: '13px', color: '#eee' }}>{img.name}</div>
-                  <div style={{ fontSize: '11px', color: '#888' }}>{img.folder}/{img.file}</div>
+                <div style={{ color: '#eee', marginTop: '10px', fontSize: '14px', fontWeight: 'bold' }}>
+                  {filteredScreenshots[screenshotModalIndex].name}
+                </div>
+                <div style={{ color: '#888', fontSize: '12px' }}>
+                  {filteredScreenshots[screenshotModalIndex].folder}/{filteredScreenshots[screenshotModalIndex].file}
+                  {filteredScreenshots.length > 1 && ` \u2014 ${screenshotModalIndex + 1} / ${filteredScreenshots.length}`}
                 </div>
               </div>
-            ))}
-          </div>
+
+              {/* Right arrow */}
+              {filteredScreenshots.length > 1 && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); setScreenshotModalIndex((screenshotModalIndex + 1) % filteredScreenshots.length); }}
+                  style={{
+                    position: 'absolute', right: '16px', top: '50%', transform: 'translateY(-50%)',
+                    background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff',
+                    fontSize: '2rem', padding: '12px 16px', cursor: 'pointer', borderRadius: '8px',
+                  }}
+                >&rarr;</button>
+              )}
+
+              {/* Close button */}
+              <button
+                onClick={() => setScreenshotModalIndex(-1)}
+                style={{
+                  position: 'absolute', top: '16px', right: '16px',
+                  background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff',
+                  fontSize: '1.5rem', padding: '8px 14px', cursor: 'pointer', borderRadius: '8px',
+                }}
+              >&times;</button>
+            </div>
+          )}
         </div>
       )}
 
