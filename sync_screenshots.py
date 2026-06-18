@@ -126,7 +126,7 @@ def main():
 
     # Step 5: Print deploy commands
     print(f'\n# Upload to Dropbox:')
-    print(f'rclone copy {output_path} dropbox:/vercel')
+    print(f'rclone copy public/screenshots.json dropbox:/vercel')
     print(f'rclone link dropbox:/vercel/screenshots.json')
     print(f'\n# Then update Vercel with the link (append &raw=1):')
     print(f'vercel env rm DROPBOX_SCREENSHOTS_URL production -y')
