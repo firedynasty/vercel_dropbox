@@ -1,56 +1,13 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import * as XLSX from 'xlsx';
-import { marked } from 'marked';
+import React, { useState, useEffect, useCallback } from 'react';
 
 const APP_KEY = process.env.REACT_APP_DROPBOX_APP_KEY;
 
 const FOLDER_PRESETS = {
+  'Videos': '/videos',
   'Chess Reports': '/chess/reports',
   'Literature': '/literature/papers',
 };
 
-// CSV parser that handles quoted fields, commas inside quotes, and escaped quotes
-function parseCsv(text) {
-  const result = [];
-  let remaining = text.trim();
-  while (remaining.length > 0) {
-    const { cells, rest } = parseCsvRow(remaining);
-    result.push(cells);
-    remaining = rest;
-  }
-  return result;
-}
-
-function parseCsvRow(text) {
-  const cells = [];
-  let i = 0;
-  while (i < text.length) {
-    if (text[i] === '\n') { i++; break; }
-    if (text[i] === '\r') { i++; if (text[i] === '\n') i++; break; }
-    if (text[i] === '"') {
-      i++;
-      let cell = '';
-      while (i < text.length) {
-        if (text[i] === '"') {
-          if (text[i + 1] === '"') { cell += '"'; i += 2; }
-          else { i++; break; }
-        } else { cell += text[i]; i++; }
-      }
-      cells.push(cell);
-      if (text[i] === ',') i++;
-      else if (text[i] === '\r' || text[i] === '\n') { if (text[i] === '\r') i++; if (text[i] === '\n') i++; break; }
-    } else {
-      let cell = '';
-      while (i < text.length && text[i] !== ',' && text[i] !== '\n' && text[i] !== '\r') {
-        cell += text[i]; i++;
-      }
-      cells.push(cell);
-      if (text[i] === ',') i++;
-      else { if (text[i] === '\r') i++; if (text[i] === '\n') i++; break; }
-    }
-  }
-  return { cells, rest: text.slice(i) };
-}
 const REDIRECT_URI = window.location.origin;
 
 // PKCE helpers using crypto.subtle
@@ -75,42 +32,16 @@ const generateCodeChallenge = async (verifier) => {
 
 function DropboxSearch() {
   const [accessToken, setAccessToken] = useState(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [results, setResults] = useState([]);
-  const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
-  const [outputMode] = useState('div');
-  const [fileContent, setFileContent] = useState('');
-  const [currentFileName, setCurrentFileName] = useState('');
-  const [currentFilePath, setCurrentFilePath] = useState('');
-  const [isEditMode, setIsEditMode] = useState(false);
-  const [editContent, setEditContent] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [searchMode] = useState('folder');
-  const [folderPath, setFolderPath] = useState('');
-  const [folderFiles, setFolderFiles] = useState([]);
-  const [folderLoading, setFolderLoading] = useState(false);
 
-  const [currentFileMimeType, setCurrentFileMimeType] = useState('');
-  const [sheetPickerOpen, setSheetPickerOpen] = useState(false);
-  const [sheetNames, setSheetNames] = useState([]);
-  const [pendingWorkbook, setPendingWorkbook] = useState(null);
-  const [pendingFileName, setPendingFileName] = useState('');
-  const [copyCellIndex, setCopyCellIndex] = useState(1);
-  const [activeWorkbook, setActiveWorkbook] = useState(null);
-  const [activeSheetName, setActiveSheetName] = useState('');
-  const [showSidebar, setShowSidebar] = useState(true);
-  const [contentFontSize, setContentFontSize] = useState(14);
-  const [markdownEnabled, setMarkdownEnabled] = useState(false);
-  const markdownRef = useRef(null);
-
-  // Screenshots state
-  const [screenshotsMode, setScreenshotsMode] = useState(false);
-  const [screenshotsData, setScreenshotsData] = useState([]);
-  const [screenshotsQuery, setScreenshotsQuery] = useState('');
-  const [screenshotsLoading, setScreenshotsLoading] = useState(false);
-  const [screenshotsLoaded, setScreenshotsLoaded] = useState(false);
-  const [screenshotModalIndex, setScreenshotModalIndex] = useState(-1);
+  // Tree view state
+  const [treePath, setTreePath] = useState('');
+  const [treeDepth, setTreeDepth] = useState(2);
+  const [treeExclude, setTreeExclude] = useState('');
+  const [treeFoldersOnly, setTreeFoldersOnly] = useState(false);
+  const [treeLines, setTreeLines] = useState([]);
+  const [treeLoading, setTreeLoading] = useState(false);
+  const [treeSummary, setTreeSummary] = useState('');
 
   // Handle OAuth redirect on mount
   useEffect(() => {
@@ -120,7 +51,6 @@ function DropboxSearch() {
     if (code) {
       const verifier = sessionStorage.getItem('dropbox_code_verifier');
       if (verifier) {
-        // Exchange code for token
         const body = new URLSearchParams({
           code,
           grant_type: 'authorization_code',
@@ -140,7 +70,6 @@ function DropboxSearch() {
               setAccessToken(data.access_token);
               setStatus('Signed in');
               sessionStorage.removeItem('dropbox_code_verifier');
-              // Clean URL
               window.history.replaceState({}, document.title, REDIRECT_URI);
             } else {
               setStatus('Auth failed: ' + (data.error_description || data.error || 'Unknown error'));
@@ -171,615 +100,179 @@ function DropboxSearch() {
         // Ignore revoke errors
       }
       setAccessToken(null);
-      setResults([]);
-      setFileContent('');
-      setCurrentFileName('');
-      setCurrentFilePath('');
-      setCurrentFileMimeType('');
-      setIsEditMode(false);
-      setEditContent('');
-      setFolderPath('');
-      setFolderFiles([]);
-      setSheetPickerOpen(false);
-      setPendingWorkbook(null);
-      setPendingFileName('');
-      setSheetNames([]);
-      setActiveWorkbook(null);
-      setActiveSheetName('');
+      setTreeLines([]);
+      setTreeSummary('');
+      setTreePath('');
       setStatus('Signed out');
     }
   };
 
-  const searchFiles = useCallback(async () => {
-    if (!searchQuery.trim() || !accessToken) return;
+  const listFolder = useCallback(async (path) => {
+    const response = await fetch('https://api.dropboxapi.com/2/files/list_folder', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ path: path || '' }),
+    });
 
-    setLoading(true);
-    setStatus('Searching...');
-    setFolderPath('');
-    setFolderFiles([]);
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error_summary || `HTTP ${response.status}`);
+    }
 
-    try {
-      const response = await fetch('https://api.dropboxapi.com/2/files/search_v2', {
+    const data = await response.json();
+    let entries = data.entries || [];
+
+    // Handle pagination
+    let hasMore = data.has_more;
+    let cursor = data.cursor;
+    while (hasMore) {
+      const contResp = await fetch('https://api.dropboxapi.com/2/files/list_folder/continue', {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          query: searchQuery,
-          options: { max_results: 20 },
-        }),
+        body: JSON.stringify({ cursor }),
       });
-
-      if (!response.ok) throw new Error('Search failed');
-
-      const data = await response.json();
-      const matches = (data.matches || []).map((m) => {
-        const metadata = m.metadata?.metadata || m.metadata;
-        return {
-          id: metadata.id,
-          name: metadata.name,
-          path: metadata.path_lower || metadata.path_display,
-          isFolder: metadata['.tag'] === 'folder',
-        };
-      });
-
-      setResults(matches);
-      setStatus(`Found ${matches.length} files`);
-    } catch (error) {
-      setStatus('Error: ' + error.message);
-    } finally {
-      setLoading(false);
+      if (!contResp.ok) break;
+      const contData = await contResp.json();
+      entries = entries.concat(contData.entries || []);
+      hasMore = contData.has_more;
+      cursor = contData.cursor;
     }
-  }, [searchQuery, accessToken]);
 
-  const loadFolder = useCallback(async (path) => {
-    setFolderLoading(true);
-    setStatus(`Loading folder...`);
-
-    try {
-      const response = await fetch('https://api.dropboxapi.com/2/files/list_folder', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ path }),
-      });
-
-      if (!response.ok) throw new Error('Failed to list folder');
-
-      const data = await response.json();
-      const entries = (data.entries || []).map((entry) => ({
-        id: entry.id,
-        name: entry.name,
-        path: entry.path_lower || entry.path_display,
-        isFolder: entry['.tag'] === 'folder',
-        modified: entry.server_modified || '',
-      }));
-
-      // Sort: folders first, then files; by last modified ascending within each
-      entries.sort((a, b) => {
-        if (a.isFolder !== b.isFolder) return a.isFolder ? -1 : 1;
-        if (a.modified && b.modified) return a.modified.localeCompare(b.modified);
-        if (a.modified) return 1;
-        if (b.modified) return -1;
-        return a.name.localeCompare(b.name);
-      });
-
-      setFolderPath(path);
-      setFolderFiles(entries);
-      setStatus(`Loaded ${entries.length} items from ${path}`);
-    } catch (error) {
-      setStatus('Error: ' + error.message);
-    } finally {
-      setFolderLoading(false);
-    }
+    return entries.map((entry) => ({
+      name: entry.name,
+      pathDisplay: entry.path_display,
+      isFolder: entry['.tag'] === 'folder',
+    }));
   }, [accessToken]);
 
-  const searchFolders = useCallback(async () => {
-    if (!searchQuery.trim() || !accessToken) return;
+  const loadTree = useCallback(async (rootPath, maxDepth) => {
+    if (!accessToken) return;
 
-    setLoading(true);
-    setStatus('Searching for folders...');
-    setFolderPath('');
-    setFolderFiles([]);
+    setTreeLoading(true);
+    setTreeLines([]);
+    setTreeSummary('');
 
     try {
-      const response = await fetch('https://api.dropboxapi.com/2/files/search_v2', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          query: searchQuery,
-          options: {
-            max_results: 20,
-            file_categories: [{ '.tag': 'folder' }],
-          },
-        }),
-      });
+      // Build tree recursively
+      const buildNode = async (path, currentDepth) => {
+        setStatus(`Loading tree... (depth ${currentDepth}/${maxDepth})`);
+        const entries = await listFolder(path);
 
-      if (!response.ok) throw new Error('Folder search failed');
+        // Sort: folders first, then alphabetically
+        entries.sort((a, b) => {
+          if (a.isFolder !== b.isFolder) return a.isFolder ? -1 : 1;
+          return a.name.localeCompare(b.name);
+        });
 
-      const data = await response.json();
-      const folders = (data.matches || [])
-        .map((m) => m.metadata?.metadata || m.metadata)
-        .filter((m) => m['.tag'] === 'folder')
-        .map((m) => ({
-          id: m.id,
-          name: m.name,
-          path: m.path_lower || m.path_display,
-          isFolder: true,
-        }));
+        const nodes = [];
+        for (const entry of entries) {
+          const node = {
+            name: entry.name,
+            pathDisplay: entry.pathDisplay,
+            isFolder: entry.isFolder,
+            children: [],
+          };
 
-      setResults(folders);
-      setStatus(`Found ${folders.length} folders`);
+          if (entry.isFolder && currentDepth < maxDepth) {
+            try {
+              node.children = await buildNode(entry.pathDisplay, currentDepth + 1);
+            } catch {
+              // If a subfolder fails, just show it without children
+            }
+          }
+
+          nodes.push(node);
+        }
+
+        return nodes;
+      };
+
+      const tree = await buildNode(rootPath || '', 1);
+
+      // Flatten tree into renderable lines
+      const lines = [];
+      let dirCount = 0;
+      let fileCount = 0;
+
+      const flatten = (nodes, prefix) => {
+        nodes.forEach((node, index) => {
+          const isLast = index === nodes.length - 1;
+          const connector = isLast ? '\u2514\u2500\u2500 ' : '\u251C\u2500\u2500 ';
+          const icon = node.isFolder ? '\uD83D\uDCC1' : '\uD83D\uDCC4';
+          const dropboxUrl = `https://www.dropbox.com/home${node.pathDisplay}`;
+
+          if (node.isFolder) dirCount++;
+          else fileCount++;
+
+          lines.push({
+            prefix: prefix + connector,
+            icon,
+            name: node.name,
+            pathDisplay: node.pathDisplay,
+            isFolder: node.isFolder,
+            url: dropboxUrl,
+          });
+
+          if (node.children.length > 0) {
+            const childPrefix = prefix + (isLast ? '    ' : '\u2502   ');
+            flatten(node.children, childPrefix);
+          }
+        });
+      };
+
+      flatten(tree, '');
+
+      setTreeLines(lines);
+      setTreeSummary(`${dirCount} directories, ${fileCount} files`);
+      setStatus(`Tree loaded: ${dirCount} directories, ${fileCount} files`);
     } catch (error) {
-      setStatus('Error: ' + error.message);
+      setStatus('Error loading tree: ' + error.message);
     } finally {
-      setLoading(false);
+      setTreeLoading(false);
     }
-  }, [searchQuery, accessToken]);
+  }, [accessToken, listFolder]);
 
-  const handleSearch = useCallback(() => {
-    const q = searchQuery.trim();
-    if (q.startsWith('/')) {
-      // Direct path navigation — open the folder directly
-      setResults([]);
-      loadFolder(q.replace(/\/+$/, '') || '');
-      return;
-    }
-    if (searchMode === 'file') {
-      searchFiles();
-    } else {
-      searchFolders();
-    }
-  }, [searchMode, searchFiles, searchFolders, searchQuery, loadFolder]);
+  const handleLoadTree = useCallback(() => {
+    const path = treePath.trim().replace(/\/+$/, '');
+    loadTree(path, treeDepth);
+  }, [treePath, treeDepth, loadTree]);
 
-  const handleKeyPress = (e) => {
+  const handlePathKeyPress = (e) => {
     if (e.key === 'Enter') {
-      handleSearch();
+      handleLoadTree();
     }
   };
 
-  const loadScreenshots = useCallback(async () => {
-    if (screenshotsLoaded) return;
-    setScreenshotsLoading(true);
-    setStatus('Loading screenshots...');
-    try {
-      const response = await fetch('/api/screenshots');
-      if (!response.ok) throw new Error('Failed to load screenshots');
-      const data = await response.json();
-      setScreenshotsData(data);
-      setScreenshotsLoaded(true);
-      setStatus(`Loaded ${data.length} screenshots`);
-    } catch (error) {
-      setStatus('Error loading screenshots: ' + error.message);
-    } finally {
-      setScreenshotsLoading(false);
-    }
-  }, [screenshotsLoaded]);
+  // Apply filters for display
+  const excludeLower = treeExclude.trim().toLowerCase();
+  const displayLines = treeLines.filter((line) => {
+    // Folders-only filter
+    if (treeFoldersOnly && !line.isFolder) return false;
 
-  const filteredScreenshots = screenshotsQuery.trim()
-    ? screenshotsData.filter((img) =>
-        img.name.toLowerCase().includes(screenshotsQuery.trim().toLowerCase()) ||
-        img.folder.toLowerCase().includes(screenshotsQuery.trim().toLowerCase()) ||
-        img.path.toLowerCase().includes(screenshotsQuery.trim().toLowerCase())
-      )
-    : screenshotsData;
-
-  const toggleScreenshotsMode = async () => {
-    const entering = !screenshotsMode;
-    setScreenshotsMode(entering);
-    if (entering) {
-      await loadScreenshots();
-    }
-  };
-
-  // Keyboard navigation for screenshot modal
-  useEffect(() => {
-    if (screenshotModalIndex < 0) return;
-    const handleKey = (e) => {
-      if (e.key === 'ArrowRight') {
-        setScreenshotModalIndex((i) => (i + 1) % filteredScreenshots.length);
-      } else if (e.key === 'ArrowLeft') {
-        setScreenshotModalIndex((i) => (i - 1 + filteredScreenshots.length) % filteredScreenshots.length);
-      } else if (e.key === 'Escape') {
-        setScreenshotModalIndex(-1);
-      }
-    };
-    window.addEventListener('keydown', handleKey);
-    return () => window.removeEventListener('keydown', handleKey);
-  }, [screenshotModalIndex, filteredScreenshots.length]);
-
-  const handleSidebarItemClick = async (filePath, fileName, isFolder) => {
-    if (isFolder) {
-      await loadFolder(filePath);
-      return;
-    }
-    await handleFileClick(filePath, fileName);
-  };
-
-  const pickSheet = (sheetName) => {
-    const sheet = pendingWorkbook.Sheets[sheetName];
-    const csv = XLSX.utils.sheet_to_csv(sheet);
-    setFileContent(csv);
-    setCurrentFileName(`${pendingFileName} [${sheetName}]`);
-    setCurrentFileMimeType('spreadsheet');
-    setActiveWorkbook(pendingWorkbook);
-    setActiveSheetName(sheetName);
-    setSheetPickerOpen(false);
-    setPendingWorkbook(null);
-    setPendingFileName('');
-    setSheetNames([]);
-    setStatus(`Loaded sheet "${sheetName}"`);
-  };
-
-  const handleFileClick = async (filePath, fileName) => {
-    setStatus(`Fetching ${fileName}...`);
-
-    try {
-      const isXlsx = /\.xlsx?$/i.test(fileName);
-
-      const response = await fetch('https://content.dropboxapi.com/2/files/download', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Dropbox-API-Arg': JSON.stringify({ path: filePath }),
-        },
-      });
-
-      if (!response.ok) throw new Error('Download failed');
-
-      if (isXlsx) {
-        const arrayBuffer = await response.arrayBuffer();
-        const workbook = XLSX.read(new Uint8Array(arrayBuffer), { type: 'array' });
-        const names = workbook.SheetNames;
-
-        if (names.length > 1) {
-          setPendingWorkbook(workbook);
-          setPendingFileName(fileName);
-          setSheetNames(names);
-          setSheetPickerOpen(true);
-          setCurrentFilePath(filePath);
-
-          setIsEditMode(false);
-          setEditContent('');
-          setStatus(`"${fileName}" has ${names.length} sheets — pick one`);
-        } else {
-          const csv = XLSX.utils.sheet_to_csv(workbook.Sheets[names[0]]);
-          setFileContent(csv);
-          setCurrentFileName(fileName);
-          setCurrentFilePath(filePath);
-          setCurrentFileMimeType('spreadsheet');
-          setActiveWorkbook(workbook);
-          setActiveSheetName(names[0]);
-
-          setIsEditMode(false);
-          setEditContent('');
-          setStatus(`Loaded "${fileName}"`);
-        }
-      } else {
-        const content = await response.text();
-
-        if (outputMode === 'clipboard') {
-          await navigator.clipboard.writeText(content);
-          setStatus(`Copied "${fileName}" to clipboard`);
-        } else {
-          setFileContent(content);
-          setCurrentFileName(fileName);
-          setCurrentFilePath(filePath);
-          setCurrentFileMimeType('text');
-
-          setIsEditMode(false);
-          setEditContent('');
-          setStatus(`Loaded "${fileName}"`);
-        }
-      }
-    } catch (error) {
-      setStatus('Error: ' + error.message);
-    }
-  };
-
-  const handleBackToResults = () => {
-    setFolderPath('');
-    setFolderFiles([]);
-  };
-
-  const createNewFileFromClipboard = async () => {
-    if (!folderPath || !accessToken) return;
-
-    try {
-      const clipboardText = await navigator.clipboard.readText();
-      const now = new Date();
-      const hours = now.getHours();
-      const h12 = hours % 12 || 12;
-      const ampm = hours >= 12 ? 'PM' : 'AM';
-      const pad = (n) => String(n).padStart(2, '0');
-      const dateStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} at ${h12}.${pad(now.getMinutes())}.${pad(now.getSeconds())} ${ampm}`;
-      const fileName = `Screenshot ${dateStr}.md`;
-      const targetPath = `${folderPath}/${fileName}`;
-
-      setStatus(`Creating "${fileName}"...`);
-
-      const response = await fetch('https://content.dropboxapi.com/2/files/upload', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Dropbox-API-Arg': JSON.stringify({
-            path: targetPath,
-            mode: 'add',
-            autorename: true,
-            mute: true,
-          }),
-          'Content-Type': 'application/octet-stream',
-        },
-        body: clipboardText,
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error_summary || `HTTP ${response.status}`);
-      }
-
-      setStatus(`Created "${fileName}"`);
-      await loadFolder(folderPath);
-    } catch (error) {
-      setStatus('Error creating file: ' + error.message);
-    }
-  };
-
-  const toggleEditMode = () => {
-    if (!isEditMode) {
-      setEditContent(fileContent);
-      setIsEditMode(true);
-    } else {
-      setFileContent(editContent);
-      setIsEditMode(false);
-    }
-  };
-
-  const saveFileToDropbox = async () => {
-    if (!currentFilePath || !accessToken) return;
-
-    setSaving(true);
-    setStatus(`Saving "${currentFileName}"...`);
-
-    try {
-      const contentToSave = isEditMode ? editContent : fileContent;
-
-      let body;
-      if (currentFileMimeType === 'spreadsheet' && activeWorkbook) {
-        const rows = parseCsv(contentToSave);
-        const ws = XLSX.utils.aoa_to_sheet(rows);
-        activeWorkbook.Sheets[activeSheetName] = ws;
-        const xlsxArray = XLSX.write(activeWorkbook, { bookType: 'xlsx', type: 'array' });
-        body = new Uint8Array(xlsxArray);
-      } else {
-        body = contentToSave;
-      }
-
-      const response = await fetch('https://content.dropboxapi.com/2/files/upload', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Dropbox-API-Arg': JSON.stringify({
-            path: currentFilePath,
-            mode: 'overwrite',
-            mute: true,
-          }),
-          'Content-Type': 'application/octet-stream',
-        },
-        body: body,
-      });
-
-      if (response.ok) {
-        setFileContent(contentToSave);
-        setIsEditMode(false);
-        setStatus(`Saved "${currentFileName}" successfully!`);
-      } else {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error_summary || `HTTP ${response.status}`);
-      }
-    } catch (error) {
-      setStatus('Error saving: ' + error.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const appendRowFromClipboard = async () => {
-    if (!currentFilePath || !accessToken || !activeWorkbook) return;
-
-    const cell1 = window.prompt('Enter cell 1 value (clipboard will append to cell 2):');
-    if (cell1 === null || cell1.trim() === '') return;
-
-    let cell2 = '';
-    try {
-      cell2 = await navigator.clipboard.readText();
-    } catch (e) {
-      // clipboard empty or denied
+    // Exclude filter: hide matching folder and its children
+    if (excludeLower) {
+      // Check if this line's path contains an excluded folder segment
+      const segments = line.pathDisplay.toLowerCase().split('/');
+      if (segments.some((seg) => seg === excludeLower)) return false;
     }
 
-    if (!cell2.trim()) {
-      setStatus('Clipboard is empty — no row added.');
-      return;
-    }
+    return true;
+  });
 
-    const rows = parseCsv(fileContent);
-    rows.push([cell1, cell2]);
-
-    const ws = XLSX.utils.aoa_to_sheet(rows);
-    const newCsv = XLSX.utils.sheet_to_csv(ws);
-
-    setFileContent(newCsv);
-    activeWorkbook.Sheets[activeSheetName] = ws;
-
-    setStatus(`Saving "${currentFileName}"...`);
-    try {
-      const xlsxArray = XLSX.write(activeWorkbook, { bookType: 'xlsx', type: 'array' });
-      const body = new Uint8Array(xlsxArray);
-
-      const response = await fetch('https://content.dropboxapi.com/2/files/upload', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Dropbox-API-Arg': JSON.stringify({
-            path: currentFilePath,
-            mode: 'overwrite',
-            mute: true,
-          }),
-          'Content-Type': 'application/octet-stream',
-        },
-        body: body,
-      });
-
-      if (response.ok) {
-        setStatus(`Appended row and saved "${currentFileName}"`);
-      } else {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error_summary || `HTTP ${response.status}`);
-      }
-    } catch (error) {
-      setStatus('Error saving: ' + error.message);
-    }
-  };
-
-  const appendAndSave = async (textToAppend, label) => {
-    const newContent = fileContent + (fileContent.endsWith('\n') ? '' : '\n') + textToAppend;
-    setFileContent(newContent);
-
-    setStatus(`Saving "${currentFileName}"...`);
-    try {
-      const response = await fetch('https://content.dropboxapi.com/2/files/upload', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Dropbox-API-Arg': JSON.stringify({
-            path: currentFilePath,
-            mode: 'overwrite',
-            mute: true,
-          }),
-          'Content-Type': 'application/octet-stream',
-        },
-        body: newContent,
-      });
-
-      if (response.ok) {
-        setStatus(`${label} and saved "${currentFileName}"`);
-      } else {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error_summary || `HTTP ${response.status}`);
-      }
-    } catch (error) {
-      setStatus('Error saving: ' + error.message);
-    }
-  };
-
-  const appendClipboardToTextFile = async () => {
-    if (!currentFilePath || !accessToken) return;
-    let clipboardText = '';
-    try {
-      clipboardText = await navigator.clipboard.readText();
-    } catch (e) { /* clipboard empty or denied */ }
-    if (!clipboardText.trim()) {
-      setStatus('Clipboard is empty — nothing appended.');
-      return;
-    }
-    await appendAndSave(clipboardText, 'Appended clipboard');
-  };
-
-  const appendPromptToTextFile = async () => {
-    if (!currentFilePath || !accessToken) return;
-    const text = window.prompt('Enter text to append:');
-    if (!text || !text.trim()) return;
-    await appendAndSave(text, 'Appended text');
-  };
-
-  const renameFile = async () => {
-    if (!currentFilePath || !accessToken) return;
-    const newName = window.prompt('Rename file to:', currentFileName);
-    if (!newName || !newName.trim() || newName.trim() === currentFileName) return;
-
-    let finalName = newName.trim();
-    if (!finalName.includes('.')) finalName += '.md';
-
-    const parentDir = currentFilePath.substring(0, currentFilePath.lastIndexOf('/'));
-    const newPath = `${parentDir}/${finalName}`;
-
-    setStatus(`Renaming to "${finalName}"...`);
-    try {
-      const response = await fetch('https://api.dropboxapi.com/2/files/move_v2', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          from_path: currentFilePath,
-          to_path: newPath,
-          autorename: true,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error_summary || `HTTP ${response.status}`);
-      }
-
-      const data = await response.json();
-      const meta = data.metadata;
-      setCurrentFileName(meta.name);
-      setCurrentFilePath(meta.path_lower || meta.path_display);
-      setStatus(`Renamed to "${meta.name}"`);
-      if (folderPath) await loadFolder(folderPath);
-    } catch (error) {
-      setStatus('Error renaming: ' + error.message);
-    }
-  };
-
-  const deleteFile = async () => {
-    if (!currentFilePath || !accessToken) return;
-    const code = window.prompt(`Type 1234 to delete "${currentFileName}"`);
-    if (code !== '1234') {
-      if (code !== null) setStatus('Delete cancelled — incorrect code');
-      return;
-    }
-
-    setStatus(`Deleting "${currentFileName}"...`);
-    try {
-      const response = await fetch('https://api.dropboxapi.com/2/files/delete_v2', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ path: currentFilePath }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error_summary || `HTTP ${response.status}`);
-      }
-
-      const deletedName = currentFileName;
-      setFileContent('');
-      setCurrentFileName('');
-      setCurrentFilePath('');
-      setIsEditMode(false);
-      setEditContent('');
-      setStatus(`Deleted "${deletedName}"`);
-      if (folderPath) await loadFolder(folderPath);
-    } catch (error) {
-      setStatus('Error deleting: ' + error.message);
-    }
-  };
-
-  // Determine what to show in the sidebar list
-  const sidebarItems = folderPath ? folderFiles : results;
-  const showBackLink = !!folderPath;
+  // Recount for summary after filters
+  const filteredDirCount = displayLines.filter((l) => l.isFolder).length;
+  const filteredFileCount = displayLines.filter((l) => !l.isFolder).length;
+  const displaySummary = (excludeLower || treeFoldersOnly)
+    ? (treeFoldersOnly
+      ? `${filteredDirCount} directories`
+      : `${filteredDirCount} directories, ${filteredFileCount} files`)
+    : treeSummary;
 
   if (!APP_KEY) {
     return (
@@ -797,13 +290,6 @@ function DropboxSearch() {
       <div className="dropbox-header">
         <h1>Dropbox Search</h1>
         <div style={{ display: 'flex', gap: '8px' }}>
-          <button
-            onClick={toggleScreenshotsMode}
-            className={screenshotsMode ? 'sign-out-btn' : 'sign-in-btn'}
-            style={{ fontSize: '13px' }}
-          >
-            {screenshotsMode ? 'Back to Files' : 'Screenshots'}
-          </button>
           {accessToken ? (
             <button onClick={handleSignOut} className="sign-out-btn">
               Sign Out
@@ -816,375 +302,126 @@ function DropboxSearch() {
         </div>
       </div>
 
-      {screenshotsMode && (
-        <div style={{ padding: '16px' }}>
-          <div style={{ marginBottom: '12px', display: 'flex', gap: '8px' }}>
+      {accessToken && (
+        <div className="tree-container">
+          <div className="tree-controls">
             <input
               type="text"
-              value={screenshotsQuery}
-              onChange={(e) => setScreenshotsQuery(e.target.value)}
-              placeholder="Search screenshots by name (e.g. claude1)..."
+              className="tree-path-input"
+              value={treePath}
+              onChange={(e) => setTreePath(e.target.value)}
+              onKeyPress={handlePathKeyPress}
+              placeholder="Path (e.g. /videos)..."
               autoFocus
-              style={{
-                flex: 1, padding: '10px 14px', borderRadius: '6px',
-                border: '1px solid #555', background: '#2a2a3e', color: '#eee',
-                fontSize: '15px',
-              }}
             />
-          </div>
-          {screenshotsLoading && <div className="status">Loading screenshots...</div>}
-          {status && !screenshotsLoading && <div className="status">{status}</div>}
-
-          {!screenshotsQuery.trim() && screenshotsLoaded && (
-            <div style={{ color: '#aaa', fontSize: '13px' }}>
-              {screenshotsData.length} screenshot(s) loaded. Type a name to search.
-            </div>
-          )}
-
-          {screenshotsQuery.trim() && (
-            <>
-              <div style={{ color: '#aaa', marginBottom: '8px', fontSize: '13px' }}>
-                {filteredScreenshots.length} result(s) for &ldquo;{screenshotsQuery.trim()}&rdquo;
-              </div>
-              <div style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-                gap: '12px',
-              }}>
-                {filteredScreenshots.map((img, idx) => (
-                  <div key={idx} style={{
-                    background: '#1e1e2e', borderRadius: '8px', overflow: 'hidden',
-                    border: '1px solid #333', cursor: 'pointer',
-                  }} onClick={() => setScreenshotModalIndex(idx)}>
-                    <img
-                      src={img.url}
-                      alt={img.name}
-                      loading="lazy"
-                      style={{ width: '100%', display: 'block' }}
-                    />
-                    <div style={{ padding: '8px 10px' }}>
-                      <div style={{ fontWeight: 'bold', fontSize: '13px', color: '#eee' }}>{img.name}</div>
-                      <div style={{ fontSize: '11px', color: '#888' }}>{img.folder}/{img.file}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-
-          {/* Screenshot modal */}
-          {screenshotModalIndex >= 0 && screenshotModalIndex < filteredScreenshots.length && (
-            <div
-              style={{
-                position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)',
-                zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            <select
+              className="tree-preset-select"
+              onChange={(e) => {
+                const path = e.target.value;
+                if (!path) return;
+                setTreePath(path);
+                loadTree(path.replace(/\/+$/, ''), treeDepth);
               }}
-              onClick={() => setScreenshotModalIndex(-1)}
+              value=""
             >
-              {/* Left arrow */}
-              {filteredScreenshots.length > 1 && (
-                <button
-                  onClick={(e) => { e.stopPropagation(); setScreenshotModalIndex((screenshotModalIndex - 1 + filteredScreenshots.length) % filteredScreenshots.length); }}
-                  style={{
-                    position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)',
-                    background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff',
-                    fontSize: '2rem', padding: '12px 16px', cursor: 'pointer', borderRadius: '8px',
-                  }}
-                >&larr;</button>
-              )}
-
-              <div onClick={(e) => e.stopPropagation()} style={{ textAlign: 'center', maxWidth: '90vw', maxHeight: '90vh' }}>
-                <img
-                  src={filteredScreenshots[screenshotModalIndex].url}
-                  alt={filteredScreenshots[screenshotModalIndex].name}
-                  style={{ maxWidth: '85vw', maxHeight: '80vh', objectFit: 'contain', borderRadius: '4px' }}
-                />
-                <div style={{ color: '#eee', marginTop: '10px', fontSize: '14px', fontWeight: 'bold' }}>
-                  {filteredScreenshots[screenshotModalIndex].name}
-                </div>
-                <div style={{ color: '#888', fontSize: '12px' }}>
-                  {filteredScreenshots[screenshotModalIndex].folder}/{filteredScreenshots[screenshotModalIndex].file}
-                  {filteredScreenshots.length > 1 && ` \u2014 ${screenshotModalIndex + 1} / ${filteredScreenshots.length}`}
-                </div>
-              </div>
-
-              {/* Right arrow */}
-              {filteredScreenshots.length > 1 && (
-                <button
-                  onClick={(e) => { e.stopPropagation(); setScreenshotModalIndex((screenshotModalIndex + 1) % filteredScreenshots.length); }}
-                  style={{
-                    position: 'absolute', right: '16px', top: '50%', transform: 'translateY(-50%)',
-                    background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff',
-                    fontSize: '2rem', padding: '12px 16px', cursor: 'pointer', borderRadius: '8px',
-                  }}
-                >&rarr;</button>
-              )}
-
-              {/* Close button */}
-              <button
-                onClick={() => setScreenshotModalIndex(-1)}
-                style={{
-                  position: 'absolute', top: '16px', right: '16px',
-                  background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff',
-                  fontSize: '1.5rem', padding: '8px 14px', cursor: 'pointer', borderRadius: '8px',
-                }}
-              >&times;</button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {!screenshotsMode && accessToken && (
-        <div className="dropbox-layout">
-          {showSidebar && (
-          <div className="dropbox-sidebar">
-            <div className="sidebar-header">
-              <span className="sidebar-header-title">Files</span>
-              <button className="sidebar-close-btn" onClick={() => setShowSidebar(false)} title="Close sidebar">
-                &times;
-              </button>
-            </div>
-            <div className="sidebar-search">
-              <div className="folder-presets">
-                <select
-                  onChange={(e) => {
-                    const path = e.target.value;
-                    if (!path) return;
-                    setSearchQuery(path);
-                    setTimeout(() => loadFolder(path), 500);
-                  }}
-                  defaultValue=""
-                  style={{ width: '100%', padding: '6px 8px', marginBottom: '6px', borderRadius: '4px', border: '1px solid #555', background: '#2a2a3e', color: '#eee', fontSize: '13px', cursor: 'pointer' }}
-                >
-                  <option value="">-- Select folder --</option>
-                  {Object.entries(FOLDER_PRESETS).map(([label, path]) => (
-                    <option key={path} value={path}>{label}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="search-box">
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  onKeyPress={handleKeyPress}
-                  placeholder={searchMode === 'file' ? 'Search files...' : 'Search folders...'}
-                  autoFocus
-                />
-                <button onClick={handleSearch} disabled={loading || folderLoading}>
-                  {loading || folderLoading ? '...' : 'Search'}
-                </button>
-              </div>
-            </div>
-
-            {showBackLink && (
-              <div className="sidebar-nav">
-                <div className="sidebar-nav-row">
-                  <button className="back-link" onClick={handleBackToResults}>
-                    &larr; Back to results
-                  </button>
-                  <button className="new-file-btn" onClick={createNewFileFromClipboard}>
-                    + New File
-                  </button>
-                </div>
-                <div className="folder-path">{folderPath}</div>
-              </div>
-            )}
-
-            <div className="sidebar-results">
-              {sidebarItems.map((file) => (
-                <div
-                  key={file.id}
-                  className="result-item"
-                  onClick={() => handleSidebarItemClick(file.path, file.name, file.isFolder)}
-                >
-                  <span className="file-icon">
-                    {file.isFolder ? '\uD83D\uDCC1' : '\uD83D\uDCC4'}
-                  </span>
-                  <span className="file-name">{file.name}</span>
-                  {file.isFolder && !folderPath && (
-                    <span className="file-path">{file.path}</span>
-                  )}
-                </div>
+              <option value="">-- Presets --</option>
+              {Object.entries(FOLDER_PRESETS).map(([label, path]) => (
+                <option key={path} value={path}>{label}</option>
               ))}
-            </div>
+            </select>
+            <select
+              className="tree-depth-select"
+              value={treeDepth}
+              onChange={(e) => setTreeDepth(Number(e.target.value))}
+            >
+              <option value={1}>Depth 1</option>
+              <option value={2}>Depth 2</option>
+              <option value={3}>Depth 3</option>
+            </select>
+            <input
+              type="text"
+              className="tree-exclude-input"
+              value={treeExclude}
+              onChange={(e) => setTreeExclude(e.target.value)}
+              placeholder="Exclude folder..."
+            />
+            <label className="tree-folders-only">
+              <input
+                type="checkbox"
+                checked={treeFoldersOnly}
+                onChange={(e) => setTreeFoldersOnly(e.target.checked)}
+              />
+              Folders only
+            </label>
+            <button
+              className="tree-load-btn"
+              onClick={handleLoadTree}
+              disabled={treeLoading}
+            >
+              {treeLoading ? 'Loading...' : 'Load Tree'}
+            </button>
           </div>
-          )}
 
-          <div className="dropbox-main">
-            {!showSidebar && (
-              <button className="hamburger-btn" onClick={() => setShowSidebar(true)} title="Open sidebar">
-                &#9776;
-              </button>
+          {status && <div className="status">{status}</div>}
+
+          <div className="tree-output">
+            {treePath && (
+              <div className="tree-root-line">
+                {treePath.includes('/') && treePath !== '/' && (
+                  <button
+                    className="tree-up-btn"
+                    onClick={() => {
+                      const parent = treePath.substring(0, treePath.lastIndexOf('/')) || '';
+                      setTreePath(parent);
+                      loadTree(parent, treeDepth);
+                    }}
+                    title="Go up one directory"
+                  >
+                    &uarr; Up
+                  </button>
+                )}
+                {treePath}
+              </div>
             )}
-            {status && <div className="status">{status}</div>}
-
-            {/* output mode is always 'div' (View/Edit) — toggle hidden for more viewspace */}
-
-            {outputMode === 'div' && fileContent && (
-              <div className="file-content-display">
-                <div className="content-header">
-                  <div className="rename-row">
-                    <span className="rename-label" style={{ flex: 1, fontWeight: 'bold', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{currentFileName}</span>
-                    <button className="rename-btn" onClick={renameFile}>Rename</button>
-                  </div>
-                  <div className="content-actions">
-                    <button
-                      className="copy-btn"
-                      onClick={async () => {
-                        const contentToCopy = isEditMode ? editContent : fileContent;
-                        await navigator.clipboard.writeText(contentToCopy);
-                        setStatus(`Copied "${currentFileName}" to clipboard`);
-                      }}
-                    >
-                      Copy
-                    </button>
-                    <button
-                      className="font-increase-btn"
-                      onClick={() => setContentFontSize((s) => s + 2)}
-                    >
-                      + Font
-                    </button>
-                    {currentFileName.toLowerCase().endsWith('.md') && (
-                      <button
-                        className={`markdown-toggle-btn ${markdownEnabled ? 'active' : ''}`}
-                        onClick={() => setMarkdownEnabled((prev) => !prev)}
-                        title={markdownEnabled ? 'Show raw text' : 'Render markdown'}
-                      >
-                        {markdownEnabled ? 'MD' : '{ }'}
-                      </button>
-                    )}
-                    <button
-                      className="edit-btn"
-                      onClick={toggleEditMode}
-                    >
-                      {isEditMode ? 'View' : 'Edit'}
-                    </button>
-                    {isEditMode && (
-                      <button
-                        className="save-btn"
-                        onClick={saveFileToDropbox}
-                        disabled={saving}
-                      >
-                        {saving ? 'Saving...' : 'Save'}
-                      </button>
-                    )}
-                    <button
-                      className="clear-btn"
-                      onClick={() => {
-                        setFileContent('');
-                        setCurrentFileName('');
-                        setCurrentFilePath('');
-                        setCurrentFileMimeType('');
-                        setIsEditMode(false);
-                        setEditContent('');
-                        setActiveWorkbook(null);
-                        setActiveSheetName('');
-                      }}
-                    >
-                      Clear
-                    </button>
-                    <button className="delete-btn" onClick={deleteFile}>
-                      Delete
-                    </button>
-                  </div>
-                </div>
-                {currentFileMimeType === 'spreadsheet' && !isEditMode && (
-                  <div className="copy-cell-toggle">
-                    <label>
-                      <input
-                        type="radio"
-                        name="copyCell"
-                        value="1"
-                        checked={copyCellIndex === 1}
-                        onChange={() => setCopyCellIndex(1)}
-                      />
-                      Cell 2
-                    </label>
-                    <label>
-                      <input
-                        type="radio"
-                        name="copyCell"
-                        value="2"
-                        checked={copyCellIndex === 2}
-                        onChange={() => setCopyCellIndex(2)}
-                      />
-                      Cell 3
-                    </label>
-                    <button onClick={appendRowFromClipboard}>+ Row</button>
-                  </div>
+            {displayLines.map((line, idx) => (
+              <div key={idx} className="tree-line">
+                <span className="tree-connector">{line.prefix}</span>
+                <span className="tree-icon">{line.icon}</span>
+                <span className="tree-name-text">{line.name}</span>
+                {line.isFolder && (
+                  <button
+                    className="tree-action-btn tree-browse-btn"
+                    onClick={() => {
+                      setTreePath(line.pathDisplay);
+                      loadTree(line.pathDisplay, treeDepth);
+                    }}
+                    title={`Browse ${line.pathDisplay}`}
+                  >
+                    Browse
+                  </button>
                 )}
-                {currentFileMimeType !== 'spreadsheet' && !isEditMode && fileContent && (
-                  <div className="copy-cell-toggle">
-                    <button onClick={appendClipboardToTextFile}>+ Clipboard</button>
-                    <button onClick={appendPromptToTextFile}>+ Prompt</button>
-                    <button onClick={() => {
-                      const match = fileContent.match(/https?:\/\/[^\s<>"')\]]+/);
-                      if (match) window.open(match[0], '_blank');
-                      else setStatus('No link found in file');
-                    }}>Open Link in File</button>
-                  </div>
-                )}
-                {isEditMode ? (
-                  <textarea
-                    className="edit-textarea"
-                    value={editContent}
-                    onChange={(e) => setEditContent(e.target.value)}
-                    style={{ fontSize: contentFontSize }}
-                  />
-                ) : currentFileMimeType === 'spreadsheet' ? (
-                  <div className="csv-table-wrapper">
-                    <table className="csv-table">
-                      <thead>
-                        <tr>
-                          {(parseCsv(fileContent)[0] || []).map((header, i) => (
-                            <th key={i}>{header}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {parseCsv(fileContent).slice(1).map((row, ri) => (
-                          <tr key={ri} onClick={async () => {
-                            const cellText = row[copyCellIndex] || '';
-                            await navigator.clipboard.writeText(cellText);
-                            setStatus(`Copied "${cellText.length > 40 ? cellText.substring(0, 40) + '...' : cellText}" to clipboard`);
-                          }}>
-                            {row.map((cell, ci) => (
-                              <td key={ci}>{cell}</td>
-                            ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : markdownEnabled && currentFileName.toLowerCase().endsWith('.md') ? (
-                  <div
-                    className="preview-markdown"
-                    style={{ fontSize: contentFontSize }}
-                    ref={markdownRef}
-                    dangerouslySetInnerHTML={{ __html: marked.parse(fileContent) }}
-                  />
-                ) : (
-                  <pre style={{ fontSize: contentFontSize }}>{fileContent}</pre>
-                )}
+                <a
+                  href={line.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="tree-action-btn tree-open-btn"
+                  title={line.url}
+                >
+                  Open
+                </a>
+              </div>
+            ))}
+            {displayLines.length > 0 && displaySummary && (
+              <div className="tree-summary">
+                {'\n'}{displaySummary}
+              </div>
+            )}
+            {!treeLoading && treeLines.length === 0 && !status && (
+              <div className="tree-empty">
+                Enter a path or select a preset, then click Load Tree.
               </div>
             )}
           </div>
-
-          {sheetPickerOpen && (
-            <div className="sheet-picker-overlay" onClick={() => setSheetPickerOpen(false)}>
-              <div className="sheet-picker-modal" onClick={(e) => e.stopPropagation()}>
-                <h3>Select a Sheet</h3>
-                <div className="sheet-picker-list">
-                  {sheetNames.map((name) => (
-                    <button key={name} className="sheet-picker-btn" onClick={() => pickSheet(name)}>
-                      {name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
         </div>
       )}
     </div>
