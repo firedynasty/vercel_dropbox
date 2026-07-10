@@ -364,6 +364,35 @@ function DropboxSearch() {
 
           {status && <div className="status">{status}</div>}
 
+          {displayLines.length > 0 && (
+            <div className="tree-download-row">
+              <button
+                className="tree-action-btn tree-download-btn"
+                onClick={() => {
+                  const root = treePath || '/';
+                  const textLines = [root];
+                  displayLines.forEach((line) => {
+                    textLines.push(line.prefix + line.name);
+                  });
+                  if (displaySummary) {
+                    textLines.push('');
+                    textLines.push(displaySummary);
+                  }
+                  const blob = new Blob([textLines.join('\n')], { type: 'text/plain' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  const safeName = (treePath || 'root').replace(/\//g, '_').replace(/^_/, '');
+                  a.download = `tree_${safeName}.txt`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                }}
+              >
+                Download .txt
+              </button>
+            </div>
+          )}
+
           <div className="tree-output">
             {treePath && (
               <div className="tree-root-line">

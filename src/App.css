@@ -178,6 +178,28 @@
   cursor: not-allowed;
 }
 
+/* Download row */
+.tree-download-row {
+  padding: 6px 16px;
+  background: #16213e;
+  border-bottom: 1px solid #333;
+  flex-shrink: 0;
+}
+
+.tree-download-btn {
+  opacity: 1 !important;
+  background: #4a3080;
+  color: #d4b8ff;
+  border-color: #6c4ab6;
+  padding: 4px 14px;
+  font-size: 13px;
+}
+
+.tree-download-btn:hover {
+  background: #6c4ab6;
+  color: #fff;
+}
+
 /* Tree output area */
 .tree-output {
   flex: 1;
