@@ -390,6 +390,43 @@ function DropboxSearch() {
               >
                 Download .txt
               </button>
+              <button
+                className="tree-action-btn tree-newfile-btn"
+                onClick={async () => {
+                  const filename = window.prompt('New file name:', 'untitled.txt');
+                  if (!filename) return;
+                  const dir = treePath.trim().replace(/\/+$/, '') || '';
+                  const fullPath = dir ? `${dir}/${filename}` : `/${filename}`;
+                  try {
+                    const res = await fetch('https://content.dropboxapi.com/2/files/upload', {
+                      method: 'POST',
+                      headers: {
+                        Authorization: `Bearer ${accessToken}`,
+                        'Content-Type': 'application/octet-stream',
+                        'Dropbox-API-Arg': JSON.stringify({
+                          path: fullPath,
+                          mode: 'add',
+                          autorename: true,
+                          mute: false,
+                        }),
+                      },
+                      body: new Blob(['']),
+                    });
+                    if (!res.ok) {
+                      const err = await res.json().catch(() => ({}));
+                      setStatus('Error creating file: ' + (err.error_summary || `HTTP ${res.status}`));
+                    } else {
+                      const data = await res.json();
+                      setStatus(`Created: ${data.path_display}`);
+                      loadTree(treePath.trim().replace(/\/+$/, ''), treeDepth);
+                    }
+                  } catch (err) {
+                    setStatus('Error creating file: ' + err.message);
+                  }
+                }}
+              >
+                New File
+              </button>
             </div>
           )}
 

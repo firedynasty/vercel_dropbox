@@ -200,6 +200,20 @@
   color: #fff;
 }
 
+.tree-newfile-btn {
+  opacity: 1 !important;
+  background: #1a4030;
+  color: #7fe0b0;
+  border-color: #2a7050;
+  padding: 4px 14px;
+  font-size: 13px;
+}
+
+.tree-newfile-btn:hover {
+  background: #2a7050;
+  color: #fff;
+}
+
 /* Tree output area */
 .tree-output {
   flex: 1;
