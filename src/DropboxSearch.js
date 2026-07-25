@@ -279,7 +279,7 @@ function DropboxSearch() {
       } else {
         const text = await res.text();
         // Heuristic: null bytes mean binary content, don't show an editor
-        if (text.includes('')) {
+        if (text.includes('\0')) {
           setModalBinary(true);
         } else {
           setModalContent(text);
