@@ -410,7 +410,7 @@ function DropboxSearch() {
                           mute: false,
                         }),
                       },
-                      body: new Blob(['']),
+                      body: new Blob(['hello world']),
                     });
                     if (!res.ok) {
                       const err = await res.json().catch(() => ({}));
