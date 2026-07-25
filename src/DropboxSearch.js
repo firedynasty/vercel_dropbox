@@ -475,6 +475,37 @@ function DropboxSearch() {
                 >
                   Open
                 </a>
+                <button
+                  className="tree-action-btn tree-rename-btn"
+                  onClick={async () => {
+                    const newName = window.prompt('Rename to:', line.name);
+                    if (!newName || newName === line.name) return;
+                    const parentDir = line.pathDisplay.substring(0, line.pathDisplay.lastIndexOf('/'));
+                    const toPath = `${parentDir}/${newName}`;
+                    try {
+                      const res = await fetch('https://api.dropboxapi.com/2/files/move_v2', {
+                        method: 'POST',
+                        headers: {
+                          Authorization: `Bearer ${accessToken}`,
+                          'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ from_path: line.pathDisplay, to_path: toPath, autorename: false }),
+                      });
+                      if (!res.ok) {
+                        const err = await res.json().catch(() => ({}));
+                        setStatus('Rename failed: ' + (err.error_summary || `HTTP ${res.status}`));
+                      } else {
+                        setStatus(`Renamed to: ${toPath}`);
+                        loadTree(treePath.trim().replace(/\/+$/, ''), treeDepth);
+                      }
+                    } catch (err) {
+                      setStatus('Rename error: ' + err.message);
+                    }
+                  }}
+                  title="Rename"
+                >
+                  Rename
+                </button>
               </div>
             ))}
             {displayLines.length > 0 && displaySummary && (

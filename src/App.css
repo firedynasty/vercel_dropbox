@@ -307,6 +307,17 @@
   color: #fff;
 }
 
+.tree-rename-btn {
+  background: #3d2800;
+  color: #f0b060;
+  border-color: #7a5200;
+}
+
+.tree-rename-btn:hover {
+  background: #7a5200;
+  color: #fff;
+}
+
 .tree-summary {
   margin-top: 12px;
   padding-top: 8px;
