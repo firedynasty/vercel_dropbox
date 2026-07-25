@@ -393,8 +393,9 @@ function DropboxSearch() {
               <button
                 className="tree-action-btn tree-newfile-btn"
                 onClick={async () => {
-                  const filename = window.prompt('New file name:', 'untitled.txt');
+                  let filename = window.prompt('New file name:', 'untitled.txt');
                   if (!filename) return;
+                  if (!filename.includes('.')) filename += '.txt';
                   const dir = treePath.trim().replace(/\/+$/, '') || '';
                   const fullPath = dir ? `${dir}/${filename}` : `/${filename}`;
                   try {
