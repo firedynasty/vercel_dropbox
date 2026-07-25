@@ -44,6 +44,14 @@ function DropboxSearch() {
   const [treeSummary, setTreeSummary] = useState('');
   const [lastMovePath, setLastMovePath] = useState('');
 
+  // File view/edit modal state
+  const [modalFile, setModalFile] = useState(null);
+  const [modalContent, setModalContent] = useState('');
+  const [modalLoading, setModalLoading] = useState(false);
+  const [modalSaving, setModalSaving] = useState(false);
+  const [modalError, setModalError] = useState('');
+  const [modalBinary, setModalBinary] = useState(false);
+
   // Handle OAuth redirect on mount
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -249,6 +257,83 @@ function DropboxSearch() {
       handleLoadTree();
     }
   };
+
+  // Open a file in the full-screen view/edit modal
+  const openFileModal = useCallback(async (line) => {
+    setModalFile({ name: line.name, pathDisplay: line.pathDisplay });
+    setModalContent('');
+    setModalError('');
+    setModalBinary(false);
+    setModalLoading(true);
+    try {
+      const res = await fetch('https://content.dropboxapi.com/2/files/download', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Dropbox-API-Arg': JSON.stringify({ path: line.pathDisplay }),
+        },
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setModalError(err.error_summary || `HTTP ${res.status}`);
+      } else {
+        const text = await res.text();
+        // Heuristic: null bytes mean binary content, don't show an editor
+        if (text.includes('')) {
+          setModalBinary(true);
+        } else {
+          setModalContent(text);
+        }
+      }
+    } catch (err) {
+      setModalError(err.message);
+    } finally {
+      setModalLoading(false);
+    }
+  }, [accessToken]);
+
+  // Save edited content back to Dropbox (overwrite)
+  const saveModalFile = useCallback(async () => {
+    if (!modalFile || modalSaving) return;
+    setModalSaving(true);
+    setModalError('');
+    try {
+      const res = await fetch('https://content.dropboxapi.com/2/files/upload', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/octet-stream',
+          'Dropbox-API-Arg': JSON.stringify({
+            path: modalFile.pathDisplay,
+            mode: 'overwrite',
+            mute: false,
+          }),
+        },
+        body: new Blob([modalContent]),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setModalError('Save failed: ' + (err.error_summary || `HTTP ${res.status}`));
+      } else {
+        setStatus(`Saved: ${modalFile.pathDisplay}`);
+        setModalFile(null);
+      }
+    } catch (err) {
+      setModalError('Save error: ' + err.message);
+    } finally {
+      setModalSaving(false);
+    }
+  }, [accessToken, modalFile, modalContent, modalSaving]);
+
+  // Escape key closes the modal
+  useEffect(() => {
+    if (!modalFile) return;
+    const handleKey = (e) => {
+      if (e.key === 'Escape') setModalFile(null);
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [modalFile]);
 
   // Apply filters for display
   const excludeLower = treeExclude.trim().toLowerCase();
@@ -468,15 +553,25 @@ function DropboxSearch() {
                     Browse
                   </button>
                 )}
-                <a
-                  href={line.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="tree-action-btn tree-open-btn"
-                  title={line.url}
-                >
-                  Open
-                </a>
+                {line.isFolder ? (
+                  <a
+                    href={line.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="tree-action-btn tree-open-btn"
+                    title={line.url}
+                  >
+                    Open
+                  </a>
+                ) : (
+                  <button
+                    className="tree-action-btn tree-open-btn"
+                    onClick={() => openFileModal(line)}
+                    title={`View/edit ${line.pathDisplay}`}
+                  >
+                    Open
+                  </button>
+                )}
                 <button
                   className="tree-action-btn tree-rename-btn"
                   onClick={async () => {
@@ -551,6 +646,61 @@ function DropboxSearch() {
               <div className="tree-empty">
                 Enter a path or select a preset, then click Load Tree.
               </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {modalFile && (
+        <div className="file-modal-overlay">
+          <div className="file-modal-topbar">
+            <span className="file-modal-title" title={modalFile.pathDisplay}>
+              {modalFile.pathDisplay}
+            </span>
+            <div className="file-modal-actions">
+              <a
+                href={`https://www.dropbox.com/home${modalFile.pathDisplay}`}
+                target="_blank"
+                rel="noreferrer"
+                className="file-modal-link-btn"
+                title="Open in Dropbox"
+              >
+                Dropbox
+              </a>
+              {!modalLoading && !modalBinary && !modalError && (
+                <button
+                  className="file-modal-save-btn"
+                  onClick={saveModalFile}
+                  disabled={modalSaving}
+                >
+                  {modalSaving ? 'Saving...' : 'Save'}
+                </button>
+              )}
+              <button
+                className="file-modal-close-btn"
+                onClick={() => setModalFile(null)}
+                title="Close (Esc)"
+              >
+                &times;
+              </button>
+            </div>
+          </div>
+          <div className="file-modal-body">
+            {modalLoading && <div className="file-modal-message">Loading...</div>}
+            {modalError && <div className="file-modal-error">{modalError}</div>}
+            {!modalLoading && !modalError && modalBinary && (
+              <div className="file-modal-message">
+                Binary file — preview not available. Use the Dropbox button to open it.
+              </div>
+            )}
+            {!modalLoading && !modalError && !modalBinary && (
+              <textarea
+                className="file-modal-textarea"
+                value={modalContent}
+                onChange={(e) => setModalContent(e.target.value)}
+                spellCheck={false}
+                autoFocus
+              />
             )}
           </div>
         </div>
