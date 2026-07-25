@@ -42,6 +42,7 @@ function DropboxSearch() {
   const [treeLines, setTreeLines] = useState([]);
   const [treeLoading, setTreeLoading] = useState(false);
   const [treeSummary, setTreeSummary] = useState('');
+  const [lastMovePath, setLastMovePath] = useState('');
 
   // Handle OAuth redirect on mount
   useEffect(() => {
@@ -506,6 +507,38 @@ function DropboxSearch() {
                   title="Rename"
                 >
                   Rename
+                </button>
+                <button
+                  className="tree-action-btn tree-move-btn"
+                  onClick={async () => {
+                    const destDir = window.prompt('Move to folder:', lastMovePath || '/');
+                    if (!destDir) return;
+                    const normalizedDest = destDir.trim().replace(/\/+$/, '');
+                    const toPath = `${normalizedDest}/${line.name}`;
+                    try {
+                      const res = await fetch('https://api.dropboxapi.com/2/files/move_v2', {
+                        method: 'POST',
+                        headers: {
+                          Authorization: `Bearer ${accessToken}`,
+                          'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ from_path: line.pathDisplay, to_path: toPath, autorename: false }),
+                      });
+                      if (!res.ok) {
+                        const err = await res.json().catch(() => ({}));
+                        setStatus('Move failed: ' + (err.error_summary || `HTTP ${res.status}`));
+                      } else {
+                        setLastMovePath(normalizedDest);
+                        setStatus(`Moved to: ${toPath}`);
+                        loadTree(treePath.trim().replace(/\/+$/, ''), treeDepth);
+                      }
+                    } catch (err) {
+                      setStatus('Move error: ' + err.message);
+                    }
+                  }}
+                  title="Move"
+                >
+                  Move
                 </button>
               </div>
             ))}

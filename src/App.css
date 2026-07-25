@@ -318,6 +318,17 @@
   color: #fff;
 }
 
+.tree-move-btn {
+  background: #1a1a40;
+  color: #a0a0f0;
+  border-color: #3a3a80;
+}
+
+.tree-move-btn:hover {
+  background: #3a3a80;
+  color: #fff;
+}
+
 .tree-summary {
   margin-top: 12px;
   padding-top: 8px;
