@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { marked } from 'marked';
 
 const APP_KEY = process.env.REACT_APP_DROPBOX_APP_KEY;
 
@@ -51,6 +52,8 @@ function DropboxSearch() {
   const [modalSaving, setModalSaving] = useState(false);
   const [modalError, setModalError] = useState('');
   const [modalBinary, setModalBinary] = useState(false);
+  const [modalEditMode, setModalEditMode] = useState(false);
+  const [modalShowMd, setModalShowMd] = useState(false);
 
   // Handle OAuth redirect on mount
   useEffect(() => {
@@ -264,6 +267,8 @@ function DropboxSearch() {
     setModalContent('');
     setModalError('');
     setModalBinary(false);
+    setModalEditMode(false);
+    setModalShowMd(false);
     setModalLoading(true);
     try {
       const res = await fetch('https://content.dropboxapi.com/2/files/download', {
@@ -316,7 +321,7 @@ function DropboxSearch() {
         setModalError('Save failed: ' + (err.error_summary || `HTTP ${res.status}`));
       } else {
         setStatus(`Saved: ${modalFile.pathDisplay}`);
-        setModalFile(null);
+        setModalEditMode(false);
       }
     } catch (err) {
       setModalError('Save error: ' + err.message);
@@ -658,6 +663,44 @@ function DropboxSearch() {
               {modalFile.pathDisplay}
             </span>
             <div className="file-modal-actions">
+              {!modalLoading && !modalBinary && !modalError && !modalEditMode && (
+                <button
+                  className="file-modal-txtmd-btn"
+                  onClick={() => setModalShowMd((v) => !v)}
+                  title="Toggle markdown/text view"
+                  style={{
+                    background: modalShowMd ? '#4caf50' : 'rgb(224,224,224)',
+                    color: modalShowMd ? '#fff' : 'rgb(51,51,51)',
+                  }}
+                >
+                  {modalShowMd ? 'MD>TXT' : 'TXT>MD'}
+                </button>
+              )}
+              {!modalLoading && !modalBinary && !modalError && !modalEditMode && (
+                <button
+                  className="file-modal-edit-btn"
+                  onClick={() => { setModalShowMd(false); setModalEditMode(true); }}
+                >
+                  Edit
+                </button>
+              )}
+              {!modalLoading && !modalBinary && !modalError && modalEditMode && (
+                <>
+                  <button
+                    className="file-modal-save-btn"
+                    onClick={saveModalFile}
+                    disabled={modalSaving}
+                  >
+                    {modalSaving ? 'Saving...' : 'Save'}
+                  </button>
+                  <button
+                    className="file-modal-cancel-btn"
+                    onClick={() => setModalEditMode(false)}
+                  >
+                    Cancel
+                  </button>
+                </>
+              )}
               <a
                 href={`https://www.dropbox.com/home${modalFile.pathDisplay}`}
                 target="_blank"
@@ -667,15 +710,6 @@ function DropboxSearch() {
               >
                 Dropbox
               </a>
-              {!modalLoading && !modalBinary && !modalError && (
-                <button
-                  className="file-modal-save-btn"
-                  onClick={saveModalFile}
-                  disabled={modalSaving}
-                >
-                  {modalSaving ? 'Saving...' : 'Save'}
-                </button>
-              )}
               <button
                 className="file-modal-close-btn"
                 onClick={() => setModalFile(null)}
@@ -693,7 +727,7 @@ function DropboxSearch() {
                 Binary file — preview not available. Use the Dropbox button to open it.
               </div>
             )}
-            {!modalLoading && !modalError && !modalBinary && (
+            {!modalLoading && !modalError && !modalBinary && modalEditMode && (
               <textarea
                 className="file-modal-textarea"
                 value={modalContent}
@@ -701,6 +735,15 @@ function DropboxSearch() {
                 spellCheck={false}
                 autoFocus
               />
+            )}
+            {!modalLoading && !modalError && !modalBinary && !modalEditMode && modalShowMd && (
+              <div
+                className="file-modal-markdown"
+                dangerouslySetInnerHTML={{ __html: marked.parse(modalContent) }}
+              />
+            )}
+            {!modalLoading && !modalError && !modalBinary && !modalEditMode && !modalShowMd && (
+              <pre className="file-modal-pre">{modalContent}</pre>
             )}
           </div>
         </div>

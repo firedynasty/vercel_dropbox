@@ -471,3 +471,139 @@
   padding: 40px 24px;
   text-align: center;
 }
+
+.file-modal-edit-btn {
+  background: #e0a020;
+  color: #fff;
+  border: none;
+  padding: 7px 16px;
+  font-size: 14px;
+  font-weight: bold;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.file-modal-edit-btn:hover {
+  background: #c8881a;
+}
+
+.file-modal-cancel-btn {
+  background: #555;
+  color: #fff;
+  border: none;
+  padding: 7px 16px;
+  font-size: 14px;
+  font-weight: bold;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.file-modal-cancel-btn:hover {
+  background: #444;
+}
+
+.file-modal-txtmd-btn {
+  height: 34px;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 0 10px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.file-modal-pre {
+  flex: 1;
+  margin: 0;
+  padding: 20px 24px;
+  background: #0f0f23;
+  color: #eee;
+  font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+  font-size: 15px;
+  line-height: 1.7;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.file-modal-markdown {
+  flex: 1;
+  overflow: auto;
+  padding: 24px 32px;
+  background: #1a1a2e;
+  color: #ddd;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.file-modal-markdown h1,
+.file-modal-markdown h2,
+.file-modal-markdown h3,
+.file-modal-markdown h4,
+.file-modal-markdown h5,
+.file-modal-markdown h6 {
+  color: #61dafb;
+  margin-top: 1.2em;
+  margin-bottom: 0.4em;
+}
+
+.file-modal-markdown h1 { font-size: 1.8em; border-bottom: 1px solid #333; padding-bottom: 0.3em; }
+.file-modal-markdown h2 { font-size: 1.4em; border-bottom: 1px solid #2a2a3e; padding-bottom: 0.2em; }
+.file-modal-markdown h3 { font-size: 1.15em; }
+
+.file-modal-markdown p { margin: 0.8em 0; }
+
+.file-modal-markdown ul,
+.file-modal-markdown ol { margin: 0.8em 0; padding-left: 2em; }
+
+.file-modal-markdown li { margin: 0.3em 0; }
+
+.file-modal-markdown blockquote {
+  border-left: 4px solid #61dafb;
+  margin: 0.8em 0;
+  padding: 0.4em 1em;
+  background: #16213e;
+  color: #aaa;
+}
+
+.file-modal-markdown code {
+  background: #2a2a3e;
+  color: #f8c555;
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+  font-size: 0.9em;
+}
+
+.file-modal-markdown pre {
+  background: #0f0f23;
+  padding: 1em;
+  border-radius: 6px;
+  overflow-x: auto;
+}
+
+.file-modal-markdown pre code {
+  background: none;
+  padding: 0;
+  color: #eee;
+}
+
+.file-modal-markdown a { color: #61dafb; }
+
+.file-modal-markdown table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.8em 0;
+}
+
+.file-modal-markdown th,
+.file-modal-markdown td {
+  border: 1px solid #333;
+  padding: 6px 12px;
+  text-align: left;
+}
+
+.file-modal-markdown th { background: #16213e; color: #61dafb; }
+
+.file-modal-markdown hr { border: none; border-top: 1px solid #333; margin: 1.5em 0; }
