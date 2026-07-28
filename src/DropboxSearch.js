@@ -54,6 +54,7 @@ function DropboxSearch() {
   const [modalBinary, setModalBinary] = useState(false);
   const [modalEditMode, setModalEditMode] = useState(false);
   const [modalShowMd, setModalShowMd] = useState(false);
+  const [modalCopied, setModalCopied] = useState(false);
 
   // Handle OAuth redirect on mount
   useEffect(() => {
@@ -250,11 +251,6 @@ function DropboxSearch() {
     }
   }, [accessToken, listFolder]);
 
-  const handleLoadTree = useCallback(() => {
-    const path = treePath.trim().replace(/\/+$/, '');
-    loadTree(path, treeDepth);
-  }, [treePath, treeDepth, loadTree]);
-
   const handlePathKeyPress = (e) => {
     if (e.key === 'Enter') {
       handleLoadTree();
@@ -269,6 +265,7 @@ function DropboxSearch() {
     setModalBinary(false);
     setModalEditMode(false);
     setModalShowMd(false);
+    setModalCopied(false);
     setModalLoading(true);
     try {
       const res = await fetch('https://content.dropboxapi.com/2/files/download', {
@@ -296,6 +293,45 @@ function DropboxSearch() {
       setModalLoading(false);
     }
   }, [accessToken]);
+
+  // Path input submit: if the path points to a specific file, grab that file
+  // directly in the view/edit modal; otherwise load it as a folder tree.
+  const handleLoadTree = useCallback(async () => {
+    const path = treePath.trim().replace(/\/+$/, '');
+    if (path && accessToken) {
+      try {
+        const res = await fetch('https://api.dropboxapi.com/2/files/get_metadata', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ path }),
+        });
+        if (res.ok) {
+          const meta = await res.json();
+          if (meta['.tag'] === 'file') {
+            openFileModal({ name: meta.name, pathDisplay: meta.path_display });
+            return;
+          }
+        }
+      } catch {
+        // Metadata lookup failed — fall through to tree load
+      }
+    }
+    loadTree(path, treeDepth);
+  }, [treePath, treeDepth, loadTree, accessToken, openFileModal]);
+
+  // Copy the modal's file contents to the clipboard
+  const copyModalContent = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(modalContent);
+      setModalCopied(true);
+      setTimeout(() => setModalCopied(false), 1500);
+    } catch (err) {
+      setModalError('Copy failed: ' + err.message);
+    }
+  }, [modalContent]);
 
   // Save edited content back to Dropbox (overwrite)
   const saveModalFile = useCallback(async () => {
@@ -663,6 +699,15 @@ function DropboxSearch() {
               {modalFile.pathDisplay}
             </span>
             <div className="file-modal-actions">
+              {!modalLoading && !modalBinary && !modalError && (
+                <button
+                  className="file-modal-copy-btn"
+                  onClick={copyModalContent}
+                  title="Copy file contents to clipboard"
+                >
+                  {modalCopied ? 'Copied!' : 'Copy'}
+                </button>
+              )}
               {!modalLoading && !modalBinary && !modalError && !modalEditMode && (
                 <button
                   className="file-modal-txtmd-btn"
