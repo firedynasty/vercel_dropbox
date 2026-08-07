@@ -1012,7 +1012,11 @@ function DropboxSearch() {
       )}
 
       {/* ── Music Player Modal ── */}
-      {musicModal && (
+      {musicModal && (() => {
+        const currentTrackName = musicTracks[musicCurrentIdx]?.name || '';
+        const ytMatch = currentTrackName.match(/\[([a-zA-Z0-9_-]{11})\]/);
+        const youtubeId = ytMatch ? ytMatch[1] : null;
+        return (
         <div className="music-modal">
           <div className="music-modal-header">
             <span className="music-modal-title" title={musicModal.folderPath}>
@@ -1082,7 +1086,7 @@ function DropboxSearch() {
                   disabled={musicCurrentIdx <= 0}
                   title="Previous"
                 >
-                  &#9664;&#9664;
+                  ⏮
                 </button>
                 <button
                   className="music-btn music-play-btn"
@@ -1090,7 +1094,7 @@ function DropboxSearch() {
                   disabled={musicUrlLoading}
                   title="Play / Pause"
                 >
-                  {musicUrlLoading ? '...' : musicIsPlaying ? '&#9646;&#9646;' : '&#9654;'}
+                  {musicUrlLoading ? '...' : musicIsPlaying ? '⏸' : '▶'}
                 </button>
                 <button
                   className="music-btn"
@@ -1098,8 +1102,19 @@ function DropboxSearch() {
                   disabled={musicCurrentIdx >= musicTracks.length - 1}
                   title="Next"
                 >
-                  &#9654;&#9654;
+                  ⏭
                 </button>
+                {youtubeId && (
+                  <a
+                    href={`https://www.youtube.com/watch?v=${youtubeId}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="music-btn music-yt-btn"
+                    title="Open on YouTube"
+                  >
+                    YT
+                  </a>
+                )}
               </div>
 
               {/* Track list */}
@@ -1118,7 +1133,8 @@ function DropboxSearch() {
             </>
           )}
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 }

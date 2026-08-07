@@ -805,6 +805,23 @@
 
 .music-play-btn:hover { background: #d4b95c; }
 
+.music-yt-btn {
+  flex: 0 0 auto;
+  padding: 9px 12px;
+  background: #c0392b;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: 6px;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+}
+
+.music-yt-btn:hover { background: #e74c3c; }
+
 .music-track-list {
   max-height: 160px;
   overflow-y: auto;
