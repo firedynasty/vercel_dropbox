@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { marked } from 'marked';
 
 const APP_KEY = process.env.REACT_APP_DROPBOX_APP_KEY;
@@ -10,6 +10,15 @@ const FOLDER_PRESETS = {
 };
 
 const REDIRECT_URI = window.location.origin;
+
+const AUDIO_EXTENSIONS = new Set(['mp3', 'wav', 'flac', 'm4a', 'aac', 'ogg', 'opus', 'wma', 'aiff', 'aif']);
+
+const formatTime = (secs) => {
+  if (!secs || isNaN(secs) || !isFinite(secs)) return '0:00';
+  const m = Math.floor(secs / 60);
+  const s = Math.floor(secs % 60);
+  return `${m}:${s.toString().padStart(2, '0')}`;
+};
 
 // PKCE helpers using crypto.subtle
 const generateCodeVerifier = () => {
@@ -55,6 +64,28 @@ function DropboxSearch() {
   const [modalEditMode, setModalEditMode] = useState(false);
   const [modalShowMd, setModalShowMd] = useState(false);
   const [modalCopied, setModalCopied] = useState(false);
+
+  // Music player state
+  const [musicModal, setMusicModal] = useState(null); // { folderPath, folderName }
+  const [musicTracks, setMusicTracks] = useState([]);
+  const [musicLoading, setMusicLoading] = useState(false);
+  const [musicError, setMusicError] = useState('');
+  const [musicCurrentIdx, setMusicCurrentIdx] = useState(0);
+  const [musicCurrentUrl, setMusicCurrentUrl] = useState('');
+  const [musicIsPlaying, setMusicIsPlaying] = useState(false);
+  const [musicCurrentTime, setMusicCurrentTime] = useState(0);
+  const [musicDuration, setMusicDuration] = useState(0);
+  const [musicVolume, setMusicVolume] = useState(80);
+  const [musicUrlLoading, setMusicUrlLoading] = useState(false);
+
+  // Refs for audio element and stale-closure-safe access to state
+  const musicAudioRef = useRef(null);
+  const musicTracksRef = useRef([]);
+  const musicCurrentIdxRef = useRef(0);
+  const fetchAndPlayRef = useRef(null);
+
+  musicTracksRef.current = musicTracks;
+  musicCurrentIdxRef.current = musicCurrentIdx;
 
   // Handle OAuth redirect on mount
   useEffect(() => {
@@ -366,7 +397,7 @@ function DropboxSearch() {
     }
   }, [accessToken, modalFile, modalContent, modalSaving]);
 
-  // Escape key closes the modal
+  // Escape key closes the file modal
   useEffect(() => {
     if (!modalFile) return;
     const handleKey = (e) => {
@@ -375,6 +406,171 @@ function DropboxSearch() {
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
   }, [modalFile]);
+
+  // ─── Music player logic ────────────────────────────────────────────────────
+
+  // Fetch a Dropbox temporary link and start playing that track
+  const fetchAndPlay = useCallback(async (track, idx) => {
+    setMusicCurrentIdx(idx);
+    setMusicCurrentUrl('');
+    setMusicUrlLoading(true);
+    setMusicError('');
+    try {
+      const res = await fetch('https://api.dropboxapi.com/2/files/get_temporary_link', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ path: track.pathDisplay }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error_summary || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      setMusicCurrentUrl(data.link);
+    } catch (err) {
+      setMusicError('Error loading track: ' + err.message);
+    } finally {
+      setMusicUrlLoading(false);
+    }
+  }, [accessToken]);
+
+  // Always keep the ref pointing at the latest version (avoids stale closure in audio events)
+  fetchAndPlayRef.current = fetchAndPlay;
+
+  // Called from UI buttons / select to switch tracks
+  const playMusicTrack = useCallback(async (idx) => {
+    if (idx < 0 || idx >= musicTracks.length) return;
+    await fetchAndPlay(musicTracks[idx], idx);
+  }, [musicTracks, fetchAndPlay]);
+
+  // When a new URL is ready, load it into the audio element and play
+  useEffect(() => {
+    const audio = musicAudioRef.current;
+    if (!audio || !musicCurrentUrl) return;
+    audio.src = musicCurrentUrl;
+    audio.volume = musicVolume / 100;
+    audio.play().then(() => setMusicIsPlaying(true)).catch(() => {});
+  }, [musicCurrentUrl]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Sync volume changes
+  useEffect(() => {
+    const audio = musicAudioRef.current;
+    if (!audio) return;
+    audio.volume = musicVolume / 100;
+  }, [musicVolume]);
+
+  // Wire up audio element events once on mount
+  useEffect(() => {
+    const audio = musicAudioRef.current;
+    if (!audio) return;
+
+    const onTimeUpdate = () => setMusicCurrentTime(audio.currentTime);
+    const onDurationChange = () =>
+      setMusicDuration(isNaN(audio.duration) ? 0 : audio.duration);
+    const onEnded = () => {
+      const nextIdx = musicCurrentIdxRef.current + 1;
+      if (nextIdx < musicTracksRef.current.length) {
+        fetchAndPlayRef.current(musicTracksRef.current[nextIdx], nextIdx);
+      }
+    };
+    const onPlay = () => setMusicIsPlaying(true);
+    const onPause = () => setMusicIsPlaying(false);
+
+    audio.addEventListener('timeupdate', onTimeUpdate);
+    audio.addEventListener('durationchange', onDurationChange);
+    audio.addEventListener('ended', onEnded);
+    audio.addEventListener('play', onPlay);
+    audio.addEventListener('pause', onPause);
+
+    return () => {
+      audio.removeEventListener('timeupdate', onTimeUpdate);
+      audio.removeEventListener('durationchange', onDurationChange);
+      audio.removeEventListener('ended', onEnded);
+      audio.removeEventListener('play', onPlay);
+      audio.removeEventListener('pause', onPause);
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Open the music player for a folder: fetch audio files then start first track
+  const openMusicPlayer = useCallback(async (folderPath, folderName) => {
+    if (musicAudioRef.current) musicAudioRef.current.pause();
+
+    setMusicModal({ folderPath, folderName });
+    setMusicTracks([]);
+    setMusicCurrentIdx(0);
+    setMusicCurrentUrl('');
+    setMusicIsPlaying(false);
+    setMusicCurrentTime(0);
+    setMusicDuration(0);
+    setMusicError('');
+    setMusicLoading(true);
+
+    try {
+      const entries = await listFolder(folderPath);
+      const audioFiles = entries
+        .filter(
+          (e) =>
+            !e.isFolder &&
+            AUDIO_EXTENSIONS.has(e.name.split('.').pop().toLowerCase())
+        )
+        .sort((a, b) =>
+          a.name.localeCompare(b.name, undefined, { numeric: true })
+        );
+
+      if (audioFiles.length === 0) {
+        setMusicError('No audio files found in this folder.');
+        setMusicLoading(false);
+        return;
+      }
+
+      setMusicTracks(audioFiles);
+      setMusicLoading(false);
+      // fetchAndPlayRef always points at the latest fetchAndPlay
+      await fetchAndPlayRef.current(audioFiles[0], 0);
+    } catch (err) {
+      setMusicError('Error loading folder: ' + err.message);
+      setMusicLoading(false);
+    }
+  }, [listFolder]);
+
+  const closeMusicPlayer = useCallback(() => {
+    if (musicAudioRef.current) {
+      musicAudioRef.current.pause();
+      musicAudioRef.current.src = '';
+    }
+    setMusicModal(null);
+    setMusicTracks([]);
+    setMusicCurrentUrl('');
+    setMusicIsPlaying(false);
+    setMusicCurrentTime(0);
+    setMusicDuration(0);
+  }, []);
+
+  const toggleMusicPlay = useCallback(() => {
+    const audio = musicAudioRef.current;
+    if (!audio) return;
+    if (musicIsPlaying) {
+      audio.pause();
+    } else {
+      audio.play().catch(() => {});
+    }
+  }, [musicIsPlaying]);
+
+  const handleMusicSeek = useCallback(
+    (e) => {
+      const audio = musicAudioRef.current;
+      if (!audio || !musicDuration) return;
+      const rect = e.currentTarget.getBoundingClientRect();
+      const pct = (e.clientX - rect.left) / rect.width;
+      audio.currentTime = Math.max(0, Math.min(1, pct)) * musicDuration;
+    },
+    [musicDuration]
+  );
+
+  // ──────────────────────────────────────────────────────────────────────────
 
   // Apply filters for display
   const excludeLower = treeExclude.trim().toLowerCase();
@@ -414,6 +610,9 @@ function DropboxSearch() {
 
   return (
     <div className="dropbox-search">
+      {/* Hidden audio element — always in DOM so the ref is always valid */}
+      <audio ref={musicAudioRef} style={{ display: 'none' }} />
+
       <div className="dropbox-header">
         <h1>Dropbox Search</h1>
         <div style={{ display: 'flex', gap: '8px' }}>
@@ -555,6 +754,15 @@ function DropboxSearch() {
               >
                 New File
               </button>
+              <button
+                className="tree-action-btn tree-play-btn"
+                onClick={() => {
+                  const folderName = treePath.split('/').filter(Boolean).pop() || treePath || 'root';
+                  openMusicPlayer(treePath.trim().replace(/\/+$/, '') || '', folderName);
+                }}
+              >
+                Play
+              </button>
             </div>
           )}
 
@@ -583,16 +791,25 @@ function DropboxSearch() {
                 <span className="tree-icon">{line.icon}</span>
                 <span className="tree-name-text">{line.name}</span>
                 {line.isFolder && (
-                  <button
-                    className="tree-action-btn tree-browse-btn"
-                    onClick={() => {
-                      setTreePath(line.pathDisplay);
-                      loadTree(line.pathDisplay, treeDepth);
-                    }}
-                    title={`Browse ${line.pathDisplay}`}
-                  >
-                    Browse
-                  </button>
+                  <>
+                    <button
+                      className="tree-action-btn tree-browse-btn"
+                      onClick={() => {
+                        setTreePath(line.pathDisplay);
+                        loadTree(line.pathDisplay, treeDepth);
+                      }}
+                      title={`Browse ${line.pathDisplay}`}
+                    >
+                      Browse
+                    </button>
+                    <button
+                      className="tree-action-btn tree-play-btn"
+                      onClick={() => openMusicPlayer(line.pathDisplay, line.name)}
+                      title={`Play music in ${line.pathDisplay}`}
+                    >
+                      Play
+                    </button>
+                  </>
                 )}
                 {line.isFolder ? (
                   <a
@@ -791,6 +1008,115 @@ function DropboxSearch() {
               <pre className="file-modal-pre">{modalContent}</pre>
             )}
           </div>
+        </div>
+      )}
+
+      {/* ── Music Player Modal ── */}
+      {musicModal && (
+        <div className="music-modal">
+          <div className="music-modal-header">
+            <span className="music-modal-title" title={musicModal.folderPath}>
+              ♪ {musicModal.folderName}
+            </span>
+            <button className="music-modal-close" onClick={closeMusicPlayer} title="Close player">
+              &times;
+            </button>
+          </div>
+
+          {musicLoading && (
+            <div className="music-modal-msg">Loading tracks...</div>
+          )}
+          {musicError && (
+            <div className="music-modal-error">{musicError}</div>
+          )}
+
+          {!musicLoading && musicTracks.length > 0 && (
+            <>
+              {/* Track selector dropdown */}
+              <div className="music-select-row">
+                <select
+                  className="music-track-select"
+                  value={musicCurrentIdx}
+                  onChange={(e) => playMusicTrack(Number(e.target.value))}
+                >
+                  {musicTracks.map((t, i) => (
+                    <option key={i} value={i}>{t.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Progress bar */}
+              <div className="music-progress-bar" onClick={handleMusicSeek}>
+                <div
+                  className="music-progress-fill"
+                  style={{
+                    width: musicDuration > 0
+                      ? `${(musicCurrentTime / musicDuration) * 100}%`
+                      : '0%',
+                  }}
+                />
+              </div>
+              <div className="music-time">
+                {formatTime(musicCurrentTime)} / {formatTime(musicDuration)}
+              </div>
+
+              {/* Volume */}
+              <div className="music-volume-row">
+                <span>&#128264;</span>
+                <input
+                  type="range"
+                  className="music-volume-slider"
+                  min="0"
+                  max="100"
+                  value={musicVolume}
+                  onChange={(e) => setMusicVolume(Number(e.target.value))}
+                />
+                <span>&#128266;</span>
+              </div>
+
+              {/* Transport controls */}
+              <div className="music-controls">
+                <button
+                  className="music-btn"
+                  onClick={() => playMusicTrack(musicCurrentIdx - 1)}
+                  disabled={musicCurrentIdx <= 0}
+                  title="Previous"
+                >
+                  &#9664;&#9664;
+                </button>
+                <button
+                  className="music-btn music-play-btn"
+                  onClick={toggleMusicPlay}
+                  disabled={musicUrlLoading}
+                  title="Play / Pause"
+                >
+                  {musicUrlLoading ? '...' : musicIsPlaying ? '&#9646;&#9646;' : '&#9654;'}
+                </button>
+                <button
+                  className="music-btn"
+                  onClick={() => playMusicTrack(musicCurrentIdx + 1)}
+                  disabled={musicCurrentIdx >= musicTracks.length - 1}
+                  title="Next"
+                >
+                  &#9654;&#9654;
+                </button>
+              </div>
+
+              {/* Track list */}
+              <div className="music-track-list">
+                {musicTracks.map((t, i) => (
+                  <div
+                    key={i}
+                    className={`music-track-item${i === musicCurrentIdx ? ' active' : ''}`}
+                    onClick={() => playMusicTrack(i)}
+                    title={t.name}
+                  >
+                    {t.name}
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>
