@@ -407,6 +407,16 @@ function DropboxSearch() {
     return () => window.removeEventListener('keydown', handleKey);
   }, [modalFile]);
 
+  // Escape key toggles play/pause in music player
+  useEffect(() => {
+    if (!musicModal) return;
+    const handleKey = (e) => {
+      if (e.key === 'Escape') toggleMusicPlay();
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [musicModal, toggleMusicPlay]);
+
   // ─── Music player logic ────────────────────────────────────────────────────
 
   // Fetch a Dropbox temporary link and start playing that track
@@ -1092,9 +1102,9 @@ function DropboxSearch() {
                   className="music-btn music-play-btn"
                   onClick={toggleMusicPlay}
                   disabled={musicUrlLoading}
-                  title="Play / Pause"
+                  title="Play / Pause (esc)"
                 >
-                  {musicUrlLoading ? '...' : musicIsPlaying ? '⏸' : '▶'}
+                  {musicUrlLoading ? '...' : musicIsPlaying ? '⏸' : '▶'} <span style={{fontSize:'0.65em', opacity:0.7}}>(esc)</span>
                 </button>
                 <button
                   className="music-btn"
