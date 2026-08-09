@@ -83,6 +83,8 @@ function DropboxSearch() {
   const musicTracksRef = useRef([]);
   const musicCurrentIdxRef = useRef(0);
   const fetchAndPlayRef = useRef(null);
+  const modalPreRef = useRef(null);
+  const lineNavCurLineRef = useRef(-1);
 
   musicTracksRef.current = musicTracks;
   musicCurrentIdxRef.current = musicCurrentIdx;
@@ -397,15 +399,101 @@ function DropboxSearch() {
     }
   }, [accessToken, modalFile, modalContent, modalSaving]);
 
-  // Escape key closes the file modal
+  // Reset line cursor whenever the modal opens a new file
+  useEffect(() => { lineNavCurLineRef.current = -1; }, [modalFile]);
+
+  // Navigate lines in the file-modal <pre>, optionally speaking via TTS
+  const navigateModalLine = useCallback((direction, speak) => {
+    const preEl = modalPreRef.current;
+    if (!preEl) return;
+    const lines = preEl.textContent.split('\n');
+    if (!lines.length) return;
+
+    const curLine = lineNavCurLineRef.current;
+    // Skip blank lines — keep stepping until we land on a non-empty line
+    let target = curLine;
+    do { target += direction; } while (target >= 0 && target < lines.length && lines[target].trim() === '');
+    if (target < 0 || target >= lines.length) return;
+    lineNavCurLineRef.current = target;
+
+    let targetStart = 0;
+    for (let i = 0; i < target; i++) targetStart += lines[i].length + 1;
+    const targetEnd = targetStart + lines[target].length;
+
+    // Build a DOM range spanning the target line
+    function makeRange(root, startChar, endChar) {
+      let pos = 0, sNode = null, sOff = 0, eNode = null, eOff = 0;
+      function walk(n) {
+        if (sNode && eNode) return;
+        if (n.nodeType === 3) {
+          const len = n.textContent.length;
+          if (!sNode && pos + len > startChar) { sNode = n; sOff = startChar - pos; }
+          if (!eNode && pos + len >= endChar) { eNode = n; eOff = endChar - pos; }
+          pos += len;
+        } else {
+          for (let i = 0; i < n.childNodes.length; i++) { walk(n.childNodes[i]); if (sNode && eNode) return; }
+        }
+      }
+      walk(root);
+      if (!sNode) return null;
+      if (!eNode) { eNode = sNode; eOff = sNode.textContent.length; }
+      const r = document.createRange();
+      r.setStart(sNode, sOff);
+      r.setEnd(eNode, eOff);
+      return r;
+    }
+
+    const newRange = makeRange(preEl, targetStart, targetEnd);
+    if (!newRange) return;
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(newRange);
+
+    // Scroll into view without mutating the DOM (insertNode would corrupt the selection)
+    const rect = newRange.getBoundingClientRect();
+    const bodyEl = preEl.closest('.file-modal-body');
+    if (bodyEl && rect) {
+      const bodyRect = bodyEl.getBoundingClientRect();
+      bodyEl.scrollBy({ top: rect.top - bodyRect.top - bodyEl.clientHeight / 2 + rect.height / 2, behavior: 'smooth' });
+    }
+
+    if (speak) {
+      const text = lines[target].trim();
+      if (text) {
+        window.speechSynthesis.cancel();
+        const utt = new SpeechSynthesisUtterance(text);
+        utt.lang = 'en-US';
+        window.speechSynthesis.speak(utt);
+      }
+    }
+  }, []);
+
+  // Keyboard shortcuts when file modal is open
   useEffect(() => {
     if (!modalFile) return;
     const handleKey = (e) => {
-      if (e.key === 'Escape') setModalFile(null);
+      if (e.key === 'Escape') { setModalFile(null); return; }
+      if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
+      if (!e.metaKey && !e.ctrlKey && !e.altKey && !modalEditMode && !modalShowMd) {
+        if (e.key === ',' || e.key === '.') {
+          e.preventDefault();
+          navigateModalLine(e.key === ',' ? -1 : 1, false);
+        } else if (e.key === 'r') {
+          const sel = window.getSelection();
+          const text = sel ? sel.toString().trim() : '';
+          if (text) {
+            e.preventDefault();
+            window.speechSynthesis.cancel();
+            const utt = new SpeechSynthesisUtterance(text);
+            utt.lang = 'en-US';
+            window.speechSynthesis.speak(utt);
+          }
+        }
+      }
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [modalFile]);
+  }, [modalFile, modalEditMode, modalShowMd, navigateModalLine]);
 
   // ─── Music player logic ────────────────────────────────────────────────────
 
@@ -1015,9 +1103,28 @@ function DropboxSearch() {
               />
             )}
             {!modalLoading && !modalError && !modalBinary && !modalEditMode && !modalShowMd && (
-              <pre className="file-modal-pre">{modalContent}</pre>
+              <pre className="file-modal-pre" ref={modalPreRef}>{modalContent}</pre>
             )}
           </div>
+          {/* Line navigation floating buttons — visible when viewing pre content */}
+          {!modalLoading && !modalError && !modalBinary && !modalEditMode && !modalShowMd && (
+            <>
+              {/* Highlight-only ↑↓ — white border, left side */}
+              <button style={{position:'fixed',left:'6px',top:'calc(50% - 30px)',transform:'translateY(-50%)',zIndex:10001,width:'48px',height:'48px',background:'rgba(255,255,255,0.08)',borderRadius:'50%',border:'1.5px solid rgba(255,255,255,0.8)',opacity:0.15,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',padding:0,transition:'opacity 0.2s'}} onMouseDown={e=>{e.preventDefault();navigateModalLine(-1,false);}} onMouseEnter={e=>e.currentTarget.style.opacity='0.55'} onMouseLeave={e=>e.currentTarget.style.opacity='0.15'} title="Highlight prev line (,)">
+                <svg width="48" height="48" viewBox="0 0 64 64"><path d="M8 44 L32 20 L56 44" stroke="rgba(255,255,255,0.9)" strokeWidth="8" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              </button>
+              <button style={{position:'fixed',left:'6px',top:'calc(50% + 30px)',transform:'translateY(-50%)',zIndex:10001,width:'48px',height:'48px',background:'rgba(255,255,255,0.08)',borderRadius:'50%',border:'1.5px solid rgba(255,255,255,0.8)',opacity:0.15,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',padding:0,transition:'opacity 0.2s'}} onMouseDown={e=>{e.preventDefault();navigateModalLine(1,false);}} onMouseEnter={e=>e.currentTarget.style.opacity='0.55'} onMouseLeave={e=>e.currentTarget.style.opacity='0.15'} title="Highlight next line (.)">
+                <svg width="48" height="48" viewBox="0 0 64 64"><path d="M8 20 L32 44 L56 20" stroke="rgba(255,255,255,0.9)" strokeWidth="8" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              </button>
+              {/* Highlight + TTS ↑↓ — amber border, right:6px */}
+              <button style={{position:'fixed',right:'6px',top:'calc(50% - 30px)',transform:'translateY(-50%)',zIndex:10001,width:'48px',height:'48px',background:'rgba(255,255,255,0.08)',borderRadius:'50%',border:'1.5px solid rgba(255,200,50,0.8)',opacity:0.15,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',padding:0,transition:'opacity 0.2s'}} onMouseDown={e=>{e.preventDefault();navigateModalLine(-1,true);}} onMouseEnter={e=>e.currentTarget.style.opacity='0.55'} onMouseLeave={e=>e.currentTarget.style.opacity='0.15'} title="Highlight prev line & speak (r)">
+                <svg width="48" height="48" viewBox="0 0 64 64"><path d="M8 44 L32 20 L56 44" stroke="rgba(255,200,50,0.9)" strokeWidth="8" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              </button>
+              <button style={{position:'fixed',right:'6px',top:'calc(50% + 30px)',transform:'translateY(-50%)',zIndex:10001,width:'48px',height:'48px',background:'rgba(255,255,255,0.08)',borderRadius:'50%',border:'1.5px solid rgba(255,200,50,0.8)',opacity:0.15,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',padding:0,transition:'opacity 0.2s'}} onMouseDown={e=>{e.preventDefault();navigateModalLine(1,true);}} onMouseEnter={e=>e.currentTarget.style.opacity='0.55'} onMouseLeave={e=>e.currentTarget.style.opacity='0.15'} title="Highlight next line & speak (r)">
+                <svg width="48" height="48" viewBox="0 0 64 64"><path d="M8 20 L32 44 L56 20" stroke="rgba(255,200,50,0.9)" strokeWidth="8" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              </button>
+            </>
+          )}
         </div>
       )}
 
