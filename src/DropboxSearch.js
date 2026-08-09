@@ -407,16 +407,6 @@ function DropboxSearch() {
     return () => window.removeEventListener('keydown', handleKey);
   }, [modalFile]);
 
-  // Escape key toggles play/pause in music player
-  useEffect(() => {
-    if (!musicModal) return;
-    const handleKey = (e) => {
-      if (e.key === 'Escape') toggleMusicPlay();
-    };
-    window.addEventListener('keydown', handleKey);
-    return () => window.removeEventListener('keydown', handleKey);
-  }, [musicModal, toggleMusicPlay]);
-
   // ─── Music player logic ────────────────────────────────────────────────────
 
   // Fetch a Dropbox temporary link and start playing that track
@@ -568,6 +558,16 @@ function DropboxSearch() {
       audio.play().catch(() => {});
     }
   }, [musicIsPlaying]);
+
+  // Escape key toggles play/pause in music player
+  useEffect(() => {
+    if (!musicModal) return;
+    const handleKey = (e) => {
+      if (e.key === 'Escape') toggleMusicPlay();
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [musicModal, toggleMusicPlay]);
 
   const handleMusicSeek = useCallback(
     (e) => {
