@@ -13,6 +13,26 @@ const REDIRECT_URI = window.location.origin;
 
 const AUDIO_EXTENSIONS = new Set(['mp3', 'wav', 'flac', 'm4a', 'aac', 'ogg', 'opus', 'wma', 'aiff', 'aif']);
 
+// Parse a timestamp text block into chapters: "MM:SS Title" or "H:MM:SS Title"
+// JSON-encode an object for the Dropbox-API-Arg header, escaping non-ASCII chars
+const dropboxApiArg = (obj) =>
+  JSON.stringify(obj).replace(/[\u0080-\uFFFF]/g, (c) =>
+    `\\u${c.codePointAt(0).toString(16).padStart(4, '0')}`
+  );
+
+const parseChapters = (text) => {
+  const re = /^(\d+):(\d{2})(?::(\d{2}))?\s+(.+)/;
+  return text.split('\n').reduce((acc, line) => {
+    const m = line.trim().match(re);
+    if (!m) return acc;
+    const timeSecs = m[3] !== undefined
+      ? parseInt(m[1]) * 3600 + parseInt(m[2]) * 60 + parseInt(m[3])
+      : parseInt(m[1]) * 60 + parseInt(m[2]);
+    acc.push({ timeSecs, label: m[4].trim() });
+    return acc;
+  }, []);
+};
+
 const formatTime = (secs) => {
   if (!secs || isNaN(secs) || !isFinite(secs)) return '0:00';
   const m = Math.floor(secs / 60);
@@ -77,12 +97,15 @@ function DropboxSearch() {
   const [musicDuration, setMusicDuration] = useState(0);
   const [musicVolume, setMusicVolume] = useState(80);
   const [musicUrlLoading, setMusicUrlLoading] = useState(false);
+  const [musicChapters, setMusicChapters] = useState([]); // parsed chapters for current track
 
   // Refs for audio element and stale-closure-safe access to state
   const musicAudioRef = useRef(null);
   const musicTracksRef = useRef([]);
   const musicCurrentIdxRef = useRef(0);
   const fetchAndPlayRef = useRef(null);
+  const musicTxtMapRef = useRef({}); // baseName → pathDisplay for companion .txt files
+  const chapterListRef = useRef(null);
   const modalPreRef = useRef(null);
   const lineNavCurLineRef = useRef(-1);
 
@@ -503,6 +526,7 @@ function DropboxSearch() {
     setMusicCurrentUrl('');
     setMusicUrlLoading(true);
     setMusicError('');
+    setMusicChapters([]);
     try {
       const res = await fetch('https://api.dropboxapi.com/2/files/get_temporary_link', {
         method: 'POST',
@@ -518,6 +542,41 @@ function DropboxSearch() {
       }
       const data = await res.json();
       setMusicCurrentUrl(data.link);
+
+      // Load companion .txt chapters — try exact base name first, then YouTube ID fallback
+      const base = track.name.replace(/\.[^.]+$/, '');
+      const { exact, yt } = musicTxtMapRef.current;
+      console.log('[chapters] track base:', base);
+      console.log('[chapters] exact keys:', Object.keys(exact));
+      console.log('[chapters] yt keys:', Object.keys(yt));
+      let txtPath = exact[base];
+      if (!txtPath) {
+        const ytId = base.match(/\[([a-zA-Z0-9_-]{11})\]/);
+        console.log('[chapters] ytId from track:', ytId?.[1]);
+        if (ytId) txtPath = yt[ytId[1]];
+      }
+      console.log('[chapters] resolved txtPath:', txtPath);
+      if (txtPath) {
+        try {
+          const txtRes = await fetch('https://content.dropboxapi.com/2/files/download', {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              'Dropbox-API-Arg': dropboxApiArg({ path: txtPath }),
+            },
+          });
+          console.log('[chapters] download status:', txtRes.status);
+          if (txtRes.ok) {
+            const text = await txtRes.text();
+            console.log('[chapters] raw text (first 200):', text.slice(0, 200));
+            const parsed = parseChapters(text);
+            console.log('[chapters] parsed chapters:', parsed);
+            setMusicChapters(parsed);
+          }
+        } catch (e) {
+          console.warn('[chapters] fetch error:', e);
+        }
+      }
     } catch (err) {
       setMusicError('Error loading track: ' + err.message);
     } finally {
@@ -598,6 +657,21 @@ function DropboxSearch() {
 
     try {
       const entries = await listFolder(folderPath);
+
+      // Build companion .txt maps:
+      //   exact: baseName → pathDisplay (strict match)
+      //   yt:    youtubeId → pathDisplay (fallback — matches any txt sharing the same [ID])
+      const exact = {}, yt = {};
+      entries.forEach((e) => {
+        if (!e.isFolder && e.name.toLowerCase().endsWith('.txt')) {
+          const base = e.name.slice(0, -4);
+          exact[base] = e.pathDisplay;
+          const m = base.match(/\[([a-zA-Z0-9_-]{11})\]/);
+          if (m) yt[m[1]] = e.pathDisplay;
+        }
+      });
+      musicTxtMapRef.current = { exact, yt };
+
       const audioFiles = entries
         .filter(
           (e) =>
@@ -635,6 +709,8 @@ function DropboxSearch() {
     setMusicIsPlaying(false);
     setMusicCurrentTime(0);
     setMusicDuration(0);
+    setMusicChapters([]);
+    musicTxtMapRef.current = { exact: {}, yt: {} };
   }, []);
 
   const toggleMusicPlay = useCallback(() => {
@@ -656,6 +732,14 @@ function DropboxSearch() {
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
   }, [musicModal, toggleMusicPlay]);
+
+  // Auto-scroll chapter list to keep active chapter visible
+  useEffect(() => {
+    const list = chapterListRef.current;
+    if (!list || musicChapters.length === 0) return;
+    const activeEl = list.querySelector('.music-chapter-item.active');
+    if (activeEl) activeEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [musicChapters, musicCurrentTime]);
 
   const handleMusicSeek = useCallback(
     (e) => {
@@ -1247,6 +1331,31 @@ function DropboxSearch() {
                   </div>
                 ))}
               </div>
+
+              {/* Chapter list — always visible; populated from companion .txt */}
+              {(() => {
+                const activeChapterIdx = musicChapters.reduce((found, ch, i) =>
+                  ch.timeSecs <= musicCurrentTime ? i : found, -1);
+                return (
+                  <div className="music-chapter-list" ref={chapterListRef}>
+                    <div className="music-chapter-header">Tracklist</div>
+                    {musicChapters.length === 0 ? (
+                      <div className="music-chapter-empty">
+                        {musicUrlLoading ? 'Looking for tracklist…' : 'No tracklist found — add a .txt with matching name or YouTube ID next to the audio file'}
+                      </div>
+                    ) : musicChapters.map((ch, i) => (
+                      <div
+                        key={i}
+                        className={`music-chapter-item${i === activeChapterIdx ? ' active' : ''}`}
+                        onClick={() => { musicAudioRef.current.currentTime = ch.timeSecs; }}
+                      >
+                        <span className="music-chapter-time">{formatTime(ch.timeSecs)}</span>
+                        <span className="music-chapter-label">{ch.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
             </>
           )}
         </div>

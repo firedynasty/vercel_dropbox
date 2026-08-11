@@ -848,3 +848,63 @@
   color: #c9a84c;
   background: #16213e;
 }
+
+.music-chapter-list {
+  max-height: 200px;
+  overflow-y: auto;
+  border-top: 1px solid #2a2a4a;
+}
+
+.music-chapter-header {
+  padding: 6px 14px 4px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #556;
+  user-select: none;
+}
+
+.music-chapter-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 14px;
+  font-size: 11px;
+  color: #aaa;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.music-chapter-item:hover {
+  background: #16213e;
+  color: #e0e0e0;
+}
+
+.music-chapter-item.active {
+  color: #c9a84c;
+  background: #16213e;
+}
+
+.music-chapter-time {
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  color: #556;
+  flex-shrink: 0;
+}
+
+.music-chapter-item.active .music-chapter-time {
+  color: #a07830;
+}
+
+.music-chapter-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.music-chapter-empty {
+  padding: 6px 14px 10px;
+  font-size: 11px;
+  color: #556;
+  font-style: italic;
+}
