@@ -268,6 +268,16 @@
   white-space: nowrap;
 }
 
+.tree-line.active {
+  background: rgba(0, 97, 255, 0.3);
+  border-radius: 3px;
+  box-shadow: inset 3px 0 0 #0061FF;
+}
+
+.tree-line-clickable {
+  cursor: pointer;
+}
+
 .tree-connector {
   color: #555;
 }
@@ -279,6 +289,15 @@
 .tree-name-text {
   color: #eee;
   margin-right: 8px;
+}
+
+.tree-name-clickable {
+  cursor: pointer;
+}
+
+.tree-name-clickable:hover {
+  color: #61dafb;
+  text-decoration: underline;
 }
 
 .tree-action-btn {
@@ -358,17 +377,36 @@
   padding: 20px 0;
 }
 
-/* Full-screen file view/edit modal */
-.file-modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: #0f0f23;
-  z-index: 9999;
+/* Two-pane layout: tree list (left pane) + file viewer (right pane) */
+.panes-container {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+.pane-divider {
+  width: 6px;
+  background: #333;
+  flex-shrink: 0;
+  cursor: col-resize;
+  user-select: none;
+  transition: background 0.15s;
+}
+
+.pane-divider:hover,
+.pane-divider.dragging {
+  background: #0061FF;
+}
+
+.pane-right {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  background: #0f0f23;
+  border-left: 1px solid #333;
+  position: relative;
 }
 
 .file-modal-topbar {
@@ -382,14 +420,35 @@
   flex-shrink: 0;
 }
 
-.file-modal-title {
-  color: #61dafb;
+.file-modal-linenav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #888;
+  font-size: 13px;
   font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
-  font-size: 14px;
-  font-weight: bold;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.file-modal-line-input {
+  width: 64px;
+  padding: 5px 6px;
+  font-size: 13px;
+  border: 1px solid #444;
+  border-radius: 4px;
+  background: #1a1a2e;
+  color: #fff;
+  font-family: monospace;
+  text-align: right;
+}
+
+.file-modal-line-input:focus {
+  outline: none;
+  border-color: #0061FF;
+}
+
+.file-modal-line-total {
+  color: #666;
 }
 
 .file-modal-actions {

@@ -1,5 +1,20 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { marked } from 'marked';
+import { parseRTF } from '@jonahschulte/rtf-toolkit';
+
+// Extract plain text from an RTF document: text nodes carry their content,
+// paragraphs become newlines
+const rtfToPlainText = (rtf) => {
+  const walk = (nodes) =>
+    (nodes || [])
+      .map((n) => {
+        if (n.type === 'text') return n.content;
+        if (n.type === 'paragraph') return walk(n.content) + '\n';
+        return walk(n.content);
+      })
+      .join('');
+  return walk(parseRTF(rtf).content).trim();
+};
 
 const APP_KEY = process.env.REACT_APP_DROPBOX_APP_KEY;
 
@@ -84,6 +99,22 @@ function DropboxSearch() {
   const [modalEditMode, setModalEditMode] = useState(false);
   const [modalShowMd, setModalShowMd] = useState(false);
   const [modalCopied, setModalCopied] = useState(false);
+
+  // Two-pane split: tree list (left pane) + file viewer (right pane) when a file is open
+  const [paneRatio, setPaneRatio] = useState(() => {
+    try {
+      const saved = parseFloat(localStorage.getItem('paneSplitRatio'));
+      return saved > 0.1 && saved < 0.9 ? saved : 0.4;
+    } catch {
+      return 0.4;
+    }
+  });
+  const [dividerDragging, setDividerDragging] = useState(false);
+  const panesContainerRef = useRef(null);
+
+  // Line navigation in the file pane: 0-based highlighted line + its input text
+  const [lineNavCurLine, setLineNavCurLine] = useState(-1);
+  const [lineInputValue, setLineInputValue] = useState('');
 
   // Music player state
   const [musicModal, setMusicModal] = useState(null); // { folderPath, folderName }
@@ -339,6 +370,13 @@ function DropboxSearch() {
         // Heuristic: null bytes mean binary content, don't show an editor
         if (text.includes('\0')) {
           setModalBinary(true);
+        } else if (line.name.toLowerCase().endsWith('.rtf')) {
+          // Render .rtf as plain text (falls back to raw source if parsing fails)
+          try {
+            setModalContent(rtfToPlainText(text));
+          } catch {
+            setModalContent(text);
+          }
         } else {
           setModalContent(text);
         }
@@ -392,6 +430,12 @@ function DropboxSearch() {
   // Save edited content back to Dropbox (overwrite)
   const saveModalFile = useCallback(async () => {
     if (!modalFile || modalSaving) return;
+    // .rtf files are shown as extracted plain text — save as a new <name>.txt
+    // alongside the original instead of overwriting the .rtf
+    const isRtf = modalFile.name.toLowerCase().endsWith('.rtf');
+    const savePath = isRtf
+      ? modalFile.pathDisplay.replace(/\.rtf$/i, '.txt')
+      : modalFile.pathDisplay;
     setModalSaving(true);
     setModalError('');
     try {
@@ -400,8 +444,8 @@ function DropboxSearch() {
         headers: {
           Authorization: `Bearer ${accessToken}`,
           'Content-Type': 'application/octet-stream',
-          'Dropbox-API-Arg': JSON.stringify({
-            path: modalFile.pathDisplay,
+          'Dropbox-API-Arg': dropboxApiArg({
+            path: savePath,
             mode: 'overwrite',
             mute: false,
           }),
@@ -412,7 +456,13 @@ function DropboxSearch() {
         const err = await res.json().catch(() => ({}));
         setModalError('Save failed: ' + (err.error_summary || `HTTP ${res.status}`));
       } else {
-        setStatus(`Saved: ${modalFile.pathDisplay}`);
+        setStatus(isRtf ? `Saved as: ${savePath}` : `Saved: ${savePath}`);
+        if (isRtf) {
+          // Point the pane at the new .txt and refresh the tree so it appears
+          const txtName = savePath.substring(savePath.lastIndexOf('/') + 1);
+          setModalFile({ name: txtName, pathDisplay: savePath });
+          loadTree(treePath.trim().replace(/\/+$/, ''), treeDepth);
+        }
         setModalEditMode(false);
       }
     } catch (err) {
@@ -420,24 +470,57 @@ function DropboxSearch() {
     } finally {
       setModalSaving(false);
     }
-  }, [accessToken, modalFile, modalContent, modalSaving]);
+  }, [accessToken, modalFile, modalContent, modalSaving, loadTree, treePath, treeDepth]);
+
+  // Drag the center divider to resize the two panes; double-click resets the ratio
+  const startDividerDrag = useCallback((e) => {
+    e.preventDefault();
+    const container = panesContainerRef.current;
+    if (!container) return;
+    setDividerDragging(true);
+    document.body.style.userSelect = 'none';
+    const rect = container.getBoundingClientRect();
+    let ratio = 0.4;
+    const onMove = (ev) => {
+      ratio = Math.min(Math.max((ev.clientX - rect.left) / rect.width, 0.15), 0.85);
+      setPaneRatio(ratio);
+    };
+    const onUp = () => {
+      setDividerDragging(false);
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      try { localStorage.setItem('paneSplitRatio', String(ratio)); } catch { /* ignore */ }
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }, []);
+
+  const resetPaneRatio = useCallback(() => {
+    setPaneRatio(0.4);
+    try { localStorage.removeItem('paneSplitRatio'); } catch { /* ignore */ }
+  }, []);
 
   // Reset line cursor whenever the modal opens a new file
-  useEffect(() => { lineNavCurLineRef.current = -1; }, [modalFile]);
+  useEffect(() => {
+    lineNavCurLineRef.current = -1;
+    setLineNavCurLine(-1);
+  }, [modalFile]);
 
-  // Navigate lines in the file-modal <pre>, optionally speaking via TTS
-  const navigateModalLine = useCallback((direction, speak) => {
+  // Keep the topbar line-number input in sync with ,/. and arrow-button navigation
+  useEffect(() => {
+    setLineInputValue(lineNavCurLine >= 0 ? String(lineNavCurLine + 1) : '');
+  }, [lineNavCurLine]);
+
+  // Highlight a 0-based line in the file-pane <pre>, scroll to it, optionally speak it
+  const highlightModalLine = useCallback((target, speak) => {
     const preEl = modalPreRef.current;
     if (!preEl) return;
     const lines = preEl.textContent.split('\n');
     if (!lines.length) return;
-
-    const curLine = lineNavCurLineRef.current;
-    // Skip blank lines — keep stepping until we land on a non-empty line
-    let target = curLine;
-    do { target += direction; } while (target >= 0 && target < lines.length && lines[target].trim() === '');
     if (target < 0 || target >= lines.length) return;
     lineNavCurLineRef.current = target;
+    setLineNavCurLine(target);
 
     let targetStart = 0;
     for (let i = 0; i < target; i++) targetStart += lines[i].length + 1;
@@ -490,6 +573,28 @@ function DropboxSearch() {
       }
     }
   }, []);
+
+  // Step lines in the file-pane <pre>, skipping blanks, optionally speaking via TTS
+  const navigateModalLine = useCallback((direction, speak) => {
+    const preEl = modalPreRef.current;
+    if (!preEl) return;
+    const lines = preEl.textContent.split('\n');
+    if (!lines.length) return;
+
+    const curLine = lineNavCurLineRef.current;
+    // Skip blank lines — keep stepping until we land on a non-empty line
+    let target = curLine;
+    do { target += direction; } while (target >= 0 && target < lines.length && lines[target].trim() === '');
+    if (target < 0 || target >= lines.length) return;
+    highlightModalLine(target, speak);
+  }, [highlightModalLine]);
+
+  // Jump to a 1-based line number from the topbar input
+  const jumpToModalLine = useCallback((lineNum) => {
+    const target = Math.floor(Number(lineNum)) - 1;
+    if (isNaN(target)) return;
+    highlightModalLine(target, false);
+  }, [highlightModalLine]);
 
   // Keyboard shortcuts when file modal is open
   useEffect(() => {
@@ -948,7 +1053,11 @@ function DropboxSearch() {
             </div>
           )}
 
-          <div className="tree-output">
+          <div className="panes-container" ref={panesContainerRef}>
+            <div
+              className="tree-output"
+              style={modalFile ? { flex: 'none', width: `${paneRatio * 100}%` } : undefined}
+            >
             {treePath && (
               <div className="tree-root-line">
                 {treePath.includes('/') && treePath !== '/' && (
@@ -968,10 +1077,19 @@ function DropboxSearch() {
               </div>
             )}
             {displayLines.map((line, idx) => (
-              <div key={idx} className="tree-line">
+              <div
+                key={idx}
+                className={`tree-line${modalFile && modalFile.pathDisplay === line.pathDisplay ? ' active' : ''}${line.isFolder ? '' : ' tree-line-clickable'}`}
+                onClick={line.isFolder ? undefined : () => openFileModal(line)}
+              >
                 <span className="tree-connector">{line.prefix}</span>
                 <span className="tree-icon">{line.icon}</span>
-                <span className="tree-name-text">{line.name}</span>
+                <span
+                  className={line.isFolder ? 'tree-name-text' : 'tree-name-text tree-name-clickable'}
+                  title={line.isFolder ? undefined : `View/edit ${line.pathDisplay}`}
+                >
+                  {line.name}
+                </span>
                 {line.isFolder && (
                   <>
                     <button
@@ -1006,7 +1124,7 @@ function DropboxSearch() {
                 ) : (
                   <button
                     className="tree-action-btn tree-open-btn"
-                    onClick={() => openFileModal(line)}
+                    onClick={(e) => { e.stopPropagation(); openFileModal(line); }}
                     title={`View/edit ${line.pathDisplay}`}
                   >
                     Open
@@ -1014,7 +1132,8 @@ function DropboxSearch() {
                 )}
                 <button
                   className="tree-action-btn tree-rename-btn"
-                  onClick={async () => {
+                  onClick={async (e) => {
+                    e.stopPropagation();
                     const newName = window.prompt('Rename to:', line.name);
                     if (!newName || newName === line.name) return;
                     const parentDir = line.pathDisplay.substring(0, line.pathDisplay.lastIndexOf('/'));
@@ -1045,9 +1164,38 @@ function DropboxSearch() {
                 </button>
                 <button
                   className="tree-action-btn tree-move-btn"
-                  onClick={async () => {
-                    const destDir = window.prompt('Move to folder:', lastMovePath || '/');
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    const destDir = window.prompt('Move to folder (or type "delete" to delete):', lastMovePath || '/');
                     if (!destDir) return;
+
+                    // Typing "delete" deletes the file/folder instead of moving it
+                    if (destDir.trim().toLowerCase() === 'delete') {
+                      if (!window.confirm(`Delete ${line.pathDisplay}?`)) return;
+                      try {
+                        const res = await fetch('https://api.dropboxapi.com/2/files/delete_v2', {
+                          method: 'POST',
+                          headers: {
+                            Authorization: `Bearer ${accessToken}`,
+                            'Content-Type': 'application/json',
+                          },
+                          body: JSON.stringify({ path: line.pathDisplay }),
+                        });
+                        if (!res.ok) {
+                          const err = await res.json().catch(() => ({}));
+                          setStatus('Delete failed: ' + (err.error_summary || `HTTP ${res.status}`));
+                        } else {
+                          setStatus(`Deleted: ${line.pathDisplay}`);
+                          // Close pane 2 if the deleted file is open there
+                          if (modalFile && modalFile.pathDisplay === line.pathDisplay) setModalFile(null);
+                          loadTree(treePath.trim().replace(/\/+$/, ''), treeDepth);
+                        }
+                      } catch (err) {
+                        setStatus('Delete error: ' + err.message);
+                      }
+                      return;
+                    }
+
                     const normalizedDest = destDir.trim().replace(/\/+$/, '');
                     const toPath = `${normalizedDest}/${line.name}`;
                     try {
@@ -1071,7 +1219,7 @@ function DropboxSearch() {
                       setStatus('Move error: ' + err.message);
                     }
                   }}
-                  title="Move"
+                  title="Move (or type &quot;delete&quot; to delete)"
                 >
                   Move
                 </button>
@@ -1087,16 +1235,42 @@ function DropboxSearch() {
                 Enter a path or select a preset, then click Load Tree.
               </div>
             )}
-          </div>
-        </div>
-      )}
+            </div>
 
-      {modalFile && (
-        <div className="file-modal-overlay">
+            {modalFile && (
+              <>
+                <div
+                  className={`pane-divider${dividerDragging ? ' dragging' : ''}`}
+                  onMouseDown={startDividerDrag}
+                  onDoubleClick={resetPaneRatio}
+                  title="Drag to resize panes (double-click to reset)"
+                />
+                <div className="pane-right">
           <div className="file-modal-topbar">
-            <span className="file-modal-title" title={modalFile.pathDisplay}>
-              {modalFile.pathDisplay}
-            </span>
+            {!modalLoading && !modalError && !modalBinary && !modalEditMode && !modalShowMd ? (
+              <span className="file-modal-linenav">
+                Line
+                <input
+                  type="number"
+                  className="file-modal-line-input"
+                  value={lineInputValue}
+                  min={1}
+                  max={modalContent ? modalContent.split('\n').length : 1}
+                  placeholder="–"
+                  onChange={(e) => {
+                    setLineInputValue(e.target.value);
+                    const n = parseInt(e.target.value, 10);
+                    if (!isNaN(n)) jumpToModalLine(n);
+                  }}
+                  title="Jump to line"
+                />
+                <span className="file-modal-line-total">
+                  / {modalContent ? modalContent.split('\n').length : 0}
+                </span>
+              </span>
+            ) : (
+              <span className="file-modal-linenav" />
+            )}
             <div className="file-modal-actions">
               {!modalLoading && !modalBinary && !modalError && (
                 <button
@@ -1194,21 +1368,25 @@ function DropboxSearch() {
           {!modalLoading && !modalError && !modalBinary && !modalEditMode && !modalShowMd && (
             <>
               {/* Highlight-only ↑↓ — white border, left side */}
-              <button style={{position:'fixed',left:'6px',top:'calc(50% - 30px)',transform:'translateY(-50%)',zIndex:10001,width:'48px',height:'48px',background:'rgba(255,255,255,0.08)',borderRadius:'50%',border:'1.5px solid rgba(255,255,255,0.8)',opacity:0.15,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',padding:0,transition:'opacity 0.2s'}} onMouseDown={e=>{e.preventDefault();navigateModalLine(-1,false);}} onMouseEnter={e=>e.currentTarget.style.opacity='0.55'} onMouseLeave={e=>e.currentTarget.style.opacity='0.15'} title="Highlight prev line (,)">
+              <button style={{position:'absolute',left:'6px',top:'calc(50% - 30px)',transform:'translateY(-50%)',zIndex:5,width:'48px',height:'48px',background:'rgba(255,255,255,0.08)',borderRadius:'50%',border:'1.5px solid rgba(255,255,255,0.8)',opacity:0.15,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',padding:0,transition:'opacity 0.2s'}} onMouseDown={e=>{e.preventDefault();navigateModalLine(-1,false);}} onMouseEnter={e=>e.currentTarget.style.opacity='0.55'} onMouseLeave={e=>e.currentTarget.style.opacity='0.15'} title="Highlight prev line (,)">
                 <svg width="48" height="48" viewBox="0 0 64 64"><path d="M8 44 L32 20 L56 44" stroke="rgba(255,255,255,0.9)" strokeWidth="8" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
               </button>
-              <button style={{position:'fixed',left:'6px',top:'calc(50% + 30px)',transform:'translateY(-50%)',zIndex:10001,width:'48px',height:'48px',background:'rgba(255,255,255,0.08)',borderRadius:'50%',border:'1.5px solid rgba(255,255,255,0.8)',opacity:0.15,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',padding:0,transition:'opacity 0.2s'}} onMouseDown={e=>{e.preventDefault();navigateModalLine(1,false);}} onMouseEnter={e=>e.currentTarget.style.opacity='0.55'} onMouseLeave={e=>e.currentTarget.style.opacity='0.15'} title="Highlight next line (.)">
+              <button style={{position:'absolute',left:'6px',top:'calc(50% + 30px)',transform:'translateY(-50%)',zIndex:5,width:'48px',height:'48px',background:'rgba(255,255,255,0.08)',borderRadius:'50%',border:'1.5px solid rgba(255,255,255,0.8)',opacity:0.15,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',padding:0,transition:'opacity 0.2s'}} onMouseDown={e=>{e.preventDefault();navigateModalLine(1,false);}} onMouseEnter={e=>e.currentTarget.style.opacity='0.55'} onMouseLeave={e=>e.currentTarget.style.opacity='0.15'} title="Highlight next line (.)">
                 <svg width="48" height="48" viewBox="0 0 64 64"><path d="M8 20 L32 44 L56 20" stroke="rgba(255,255,255,0.9)" strokeWidth="8" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
               </button>
               {/* Highlight + TTS ↑↓ — amber border, right:6px */}
-              <button style={{position:'fixed',right:'6px',top:'calc(50% - 30px)',transform:'translateY(-50%)',zIndex:10001,width:'48px',height:'48px',background:'rgba(255,255,255,0.08)',borderRadius:'50%',border:'1.5px solid rgba(255,200,50,0.8)',opacity:0.15,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',padding:0,transition:'opacity 0.2s'}} onMouseDown={e=>{e.preventDefault();navigateModalLine(-1,true);}} onMouseEnter={e=>e.currentTarget.style.opacity='0.55'} onMouseLeave={e=>e.currentTarget.style.opacity='0.15'} title="Highlight prev line & speak (r)">
+              <button style={{position:'absolute',right:'6px',top:'calc(50% - 30px)',transform:'translateY(-50%)',zIndex:5,width:'48px',height:'48px',background:'rgba(255,255,255,0.08)',borderRadius:'50%',border:'1.5px solid rgba(255,200,50,0.8)',opacity:0.15,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',padding:0,transition:'opacity 0.2s'}} onMouseDown={e=>{e.preventDefault();navigateModalLine(-1,true);}} onMouseEnter={e=>e.currentTarget.style.opacity='0.55'} onMouseLeave={e=>e.currentTarget.style.opacity='0.15'} title="Highlight prev line & speak (r)">
                 <svg width="48" height="48" viewBox="0 0 64 64"><path d="M8 44 L32 20 L56 44" stroke="rgba(255,200,50,0.9)" strokeWidth="8" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
               </button>
-              <button style={{position:'fixed',right:'6px',top:'calc(50% + 30px)',transform:'translateY(-50%)',zIndex:10001,width:'48px',height:'48px',background:'rgba(255,255,255,0.08)',borderRadius:'50%',border:'1.5px solid rgba(255,200,50,0.8)',opacity:0.15,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',padding:0,transition:'opacity 0.2s'}} onMouseDown={e=>{e.preventDefault();navigateModalLine(1,true);}} onMouseEnter={e=>e.currentTarget.style.opacity='0.55'} onMouseLeave={e=>e.currentTarget.style.opacity='0.15'} title="Highlight next line & speak (r)">
+              <button style={{position:'absolute',right:'6px',top:'calc(50% + 30px)',transform:'translateY(-50%)',zIndex:5,width:'48px',height:'48px',background:'rgba(255,255,255,0.08)',borderRadius:'50%',border:'1.5px solid rgba(255,200,50,0.8)',opacity:0.15,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',padding:0,transition:'opacity 0.2s'}} onMouseDown={e=>{e.preventDefault();navigateModalLine(1,true);}} onMouseEnter={e=>e.currentTarget.style.opacity='0.55'} onMouseLeave={e=>e.currentTarget.style.opacity='0.15'} title="Highlight next line & speak (r)">
                 <svg width="48" height="48" viewBox="0 0 64 64"><path d="M8 20 L32 44 L56 20" stroke="rgba(255,200,50,0.9)" strokeWidth="8" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
               </button>
             </>
           )}
+                </div>
+              </>
+            )}
+          </div>
         </div>
       )}
 
