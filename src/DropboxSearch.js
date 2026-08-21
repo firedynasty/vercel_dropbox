@@ -555,12 +555,11 @@ function DropboxSearch() {
     sel.removeAllRanges();
     sel.addRange(newRange);
 
-    // Scroll into view without mutating the DOM (insertNode would corrupt the selection)
+    // Scroll the <pre> (the actual scroll container) so the line lands centered
     const rect = newRange.getBoundingClientRect();
-    const bodyEl = preEl.closest('.file-modal-body');
-    if (bodyEl && rect) {
-      const bodyRect = bodyEl.getBoundingClientRect();
-      bodyEl.scrollBy({ top: rect.top - bodyRect.top - bodyEl.clientHeight / 2 + rect.height / 2, behavior: 'smooth' });
+    if (rect) {
+      const preRect = preEl.getBoundingClientRect();
+      preEl.scrollBy({ top: rect.top - preRect.top - preEl.clientHeight / 2 + rect.height / 2, behavior: 'smooth' });
     }
 
     if (speak) {
@@ -595,6 +594,13 @@ function DropboxSearch() {
     if (isNaN(target)) return;
     highlightModalLine(target, false);
   }, [highlightModalLine]);
+
+  // Scroll the file-pane content down by one page
+  const pageDownModal = useCallback(() => {
+    const preEl = modalPreRef.current;
+    if (!preEl) return;
+    preEl.scrollBy({ top: preEl.clientHeight * 0.9, behavior: 'smooth' });
+  }, []);
 
   // Keyboard shortcuts when file modal is open
   useEffect(() => {
@@ -1367,19 +1373,16 @@ function DropboxSearch() {
           {/* Line navigation floating buttons — visible when viewing pre content */}
           {!modalLoading && !modalError && !modalBinary && !modalEditMode && !modalShowMd && (
             <>
-              {/* Highlight-only ↑↓ — white border, left side */}
-              <button style={{position:'absolute',left:'6px',top:'calc(50% - 30px)',transform:'translateY(-50%)',zIndex:5,width:'48px',height:'48px',background:'rgba(255,255,255,0.08)',borderRadius:'50%',border:'1.5px solid rgba(255,255,255,0.8)',opacity:0.15,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',padding:0,transition:'opacity 0.2s'}} onMouseDown={e=>{e.preventDefault();navigateModalLine(-1,false);}} onMouseEnter={e=>e.currentTarget.style.opacity='0.55'} onMouseLeave={e=>e.currentTarget.style.opacity='0.15'} title="Highlight prev line (,)">
-                <svg width="48" height="48" viewBox="0 0 64 64"><path d="M8 44 L32 20 L56 44" stroke="rgba(255,255,255,0.9)" strokeWidth="8" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
-              </button>
-              <button style={{position:'absolute',left:'6px',top:'calc(50% + 30px)',transform:'translateY(-50%)',zIndex:5,width:'48px',height:'48px',background:'rgba(255,255,255,0.08)',borderRadius:'50%',border:'1.5px solid rgba(255,255,255,0.8)',opacity:0.15,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',padding:0,transition:'opacity 0.2s'}} onMouseDown={e=>{e.preventDefault();navigateModalLine(1,false);}} onMouseEnter={e=>e.currentTarget.style.opacity='0.55'} onMouseLeave={e=>e.currentTarget.style.opacity='0.15'} title="Highlight next line (.)">
-                <svg width="48" height="48" viewBox="0 0 64 64"><path d="M8 20 L32 44 L56 20" stroke="rgba(255,255,255,0.9)" strokeWidth="8" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
-              </button>
-              {/* Highlight + TTS ↑↓ — amber border, right:6px */}
-              <button style={{position:'absolute',right:'6px',top:'calc(50% - 30px)',transform:'translateY(-50%)',zIndex:5,width:'48px',height:'48px',background:'rgba(255,255,255,0.08)',borderRadius:'50%',border:'1.5px solid rgba(255,200,50,0.8)',opacity:0.15,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',padding:0,transition:'opacity 0.2s'}} onMouseDown={e=>{e.preventDefault();navigateModalLine(-1,true);}} onMouseEnter={e=>e.currentTarget.style.opacity='0.55'} onMouseLeave={e=>e.currentTarget.style.opacity='0.15'} title="Highlight prev line & speak (r)">
+              {/* Highlight + TTS ↑↓ — amber border, right side */}
+              <button style={{position:'absolute',right:'6px',top:'calc(50% - 60px)',transform:'translateY(-50%)',zIndex:5,width:'48px',height:'48px',background:'rgba(255,255,255,0.08)',borderRadius:'50%',border:'1.5px solid rgba(255,200,50,0.8)',opacity:0.15,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',padding:0,transition:'opacity 0.2s'}} onMouseDown={e=>{e.preventDefault();navigateModalLine(-1,true);}} onMouseEnter={e=>e.currentTarget.style.opacity='0.55'} onMouseLeave={e=>e.currentTarget.style.opacity='0.15'} title="Highlight prev line & speak (r)">
                 <svg width="48" height="48" viewBox="0 0 64 64"><path d="M8 44 L32 20 L56 44" stroke="rgba(255,200,50,0.9)" strokeWidth="8" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
               </button>
-              <button style={{position:'absolute',right:'6px',top:'calc(50% + 30px)',transform:'translateY(-50%)',zIndex:5,width:'48px',height:'48px',background:'rgba(255,255,255,0.08)',borderRadius:'50%',border:'1.5px solid rgba(255,200,50,0.8)',opacity:0.15,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',padding:0,transition:'opacity 0.2s'}} onMouseDown={e=>{e.preventDefault();navigateModalLine(1,true);}} onMouseEnter={e=>e.currentTarget.style.opacity='0.55'} onMouseLeave={e=>e.currentTarget.style.opacity='0.15'} title="Highlight next line & speak (r)">
+              <button style={{position:'absolute',right:'6px',top:'50%',transform:'translateY(-50%)',zIndex:5,width:'48px',height:'48px',background:'rgba(255,255,255,0.08)',borderRadius:'50%',border:'1.5px solid rgba(255,200,50,0.8)',opacity:0.15,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',padding:0,transition:'opacity 0.2s'}} onMouseDown={e=>{e.preventDefault();navigateModalLine(1,true);}} onMouseEnter={e=>e.currentTarget.style.opacity='0.55'} onMouseLeave={e=>e.currentTarget.style.opacity='0.15'} title="Highlight next line & speak (r)">
                 <svg width="48" height="48" viewBox="0 0 64 64"><path d="M8 20 L32 44 L56 20" stroke="rgba(255,200,50,0.9)" strokeWidth="8" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              </button>
+              {/* Page down — white border */}
+              <button style={{position:'absolute',right:'6px',top:'calc(50% + 60px)',transform:'translateY(-50%)',zIndex:5,width:'48px',height:'48px',background:'rgba(255,255,255,0.08)',borderRadius:'50%',border:'1.5px solid rgba(255,255,255,0.8)',opacity:0.15,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',padding:0,transition:'opacity 0.2s'}} onMouseDown={e=>{e.preventDefault();pageDownModal();}} onMouseEnter={e=>e.currentTarget.style.opacity='0.55'} onMouseLeave={e=>e.currentTarget.style.opacity='0.15'} title="Page down">
+                <svg width="48" height="48" viewBox="0 0 64 64"><path d="M8 20 L32 44 L56 20" stroke="rgba(255,255,255,0.9)" strokeWidth="8" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
               </button>
             </>
           )}
