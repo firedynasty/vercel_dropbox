@@ -96,6 +96,9 @@ function DropboxSearch() {
   const [modalSaving, setModalSaving] = useState(false);
   const [modalError, setModalError] = useState('');
   const [modalBinary, setModalBinary] = useState(false);
+  const [modalPdfData, setModalPdfData] = useState(null);  // ArrayBuffer for PDF rendering
+  const [modalImgUrl, setModalImgUrl] = useState(null);    // blob URL for image preview
+  const [modalQrResult, setModalQrResult] = useState(null); // decoded QR string from image
   const [modalEditMode, setModalEditMode] = useState(false);
   const [modalShowMd, setModalShowMd] = useState(false);
   const [modalCopied, setModalCopied] = useState(false);
@@ -138,6 +141,8 @@ function DropboxSearch() {
   const musicTxtMapRef = useRef({}); // baseName → pathDisplay for companion .txt files
   const chapterListRef = useRef(null);
   const modalPreRef = useRef(null);
+  const pdfContainerRef = useRef(null);
+  const pdfRenderRef = useRef(null); // stores cancel fn for in-progress render
   const lineNavCurLineRef = useRef(-1);
 
   musicTracksRef.current = musicTracks;
@@ -218,8 +223,17 @@ function DropboxSearch() {
     });
 
     if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
-      throw new Error(err.error_summary || `HTTP ${response.status}`);
+      let errMsg = `HTTP ${response.status}`;
+      try {
+        const body = await response.text();
+        try {
+          const err = JSON.parse(body);
+          errMsg = err.error_summary || err.error || errMsg;
+        } catch {
+          if (body) errMsg += ': ' + body.slice(0, 200);
+        }
+      } catch { /* ignore */ }
+      throw new Error(errMsg);
     }
 
     const data = await response.json();
@@ -346,10 +360,17 @@ function DropboxSearch() {
 
   // Open a file in the full-screen view/edit modal
   const openFileModal = useCallback(async (line) => {
+    const nameLower = line.name.toLowerCase();
+    const isPdf = nameLower.endsWith('.pdf');
+    const isImg = nameLower.endsWith('.png') || nameLower.endsWith('.jpg') || nameLower.endsWith('.jpeg');
+
     setModalFile({ name: line.name, pathDisplay: line.pathDisplay });
     setModalContent('');
     setModalError('');
     setModalBinary(false);
+    setModalPdfData(null);
+    setModalImgUrl(prev => { if (prev) URL.revokeObjectURL(prev); return null; });
+    setModalQrResult(null);
     setModalEditMode(false);
     setModalShowMd(false);
     setModalCopied(false);
@@ -365,12 +386,18 @@ function DropboxSearch() {
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         setModalError(err.error_summary || `HTTP ${res.status}`);
+      } else if (isPdf) {
+        const buf = await res.arrayBuffer();
+        setModalPdfData(buf);
+      } else if (isImg) {
+        const blob = await res.blob();
+        setModalImgUrl(URL.createObjectURL(blob));
       } else {
         const text = await res.text();
         // Heuristic: null bytes mean binary content, don't show an editor
         if (text.includes('\0')) {
           setModalBinary(true);
-        } else if (line.name.toLowerCase().endsWith('.rtf')) {
+        } else if (nameLower.endsWith('.rtf')) {
           // Render .rtf as plain text (falls back to raw source if parsing fails)
           try {
             setModalContent(rtfToPlainText(text));
@@ -391,7 +418,9 @@ function DropboxSearch() {
   // Path input submit: if the path points to a specific file, grab that file
   // directly in the view/edit modal; otherwise load it as a folder tree.
   const handleLoadTree = useCallback(async () => {
-    const path = treePath.trim().replace(/\/+$/, '');
+    let path = treePath.trim().replace(/\/+$/, '');
+    // Dropbox requires paths to start with '/' (root is the empty string "")
+    if (path && !path.startsWith('/')) path = '/' + path;
     if (path && accessToken) {
       try {
         const res = await fetch('https://api.dropboxapi.com/2/files/get_metadata', {
@@ -500,6 +529,46 @@ function DropboxSearch() {
     setPaneRatio(0.4);
     try { localStorage.removeItem('paneSplitRatio'); } catch { /* ignore */ }
   }, []);
+
+  // Render PDF pages into a container — called via callback ref so it fires
+  // as soon as the container div mounts (modalPdfData is already set by then)
+  const renderPdf = useCallback((container) => {
+    pdfContainerRef.current = container;
+    if (pdfRenderRef.current) { pdfRenderRef.current(); pdfRenderRef.current = null; }
+    if (!container || !modalPdfData) return;
+    const pdfjsLib = window.pdfjsLib;
+    if (!pdfjsLib) { container.textContent = 'PDF.js not loaded.'; return; }
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    container.innerHTML = '';
+    let cancelled = false;
+    pdfRenderRef.current = () => { cancelled = true; };
+    pdfjsLib.getDocument({ data: modalPdfData }).promise.then(async (pdf) => {
+      for (let i = 1; i <= pdf.numPages; i++) {
+        if (cancelled) break;
+        const page = await pdf.getPage(i);
+        const viewport = page.getViewport({ scale: 1.5 });
+        const canvas = document.createElement('canvas');
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        canvas.style.cssText = 'display:block;margin-bottom:8px;max-width:100%';
+        if (!cancelled) {
+          container.appendChild(canvas);
+          await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+        }
+      }
+    }).catch(() => {
+      if (!cancelled) container.textContent = 'Failed to render PDF.';
+    });
+  }, [modalPdfData]);
+
+  // Clean up image blob URL when modal closes
+  useEffect(() => {
+    if (!modalFile && modalImgUrl) {
+      URL.revokeObjectURL(modalImgUrl);
+      setModalImgUrl(null);
+    }
+  }, [modalFile, modalImgUrl]);
 
   // Reset line cursor whenever the modal opens a new file
   useEffect(() => {
@@ -1278,6 +1347,15 @@ function DropboxSearch() {
               <span className="file-modal-linenav" />
             )}
             <div className="file-modal-actions">
+              {!modalLoading && !modalError && modalQrResult && (
+                <button
+                  className="file-modal-copy-btn"
+                  onClick={() => navigator.clipboard.writeText(modalQrResult)}
+                  title={`Copy QR code: ${modalQrResult}`}
+                >
+                  &#x1F4F7;
+                </button>
+              )}
               {!modalLoading && !modalBinary && !modalError && (
                 <button
                   className="file-modal-copy-btn"
@@ -1349,6 +1427,50 @@ function DropboxSearch() {
             {!modalLoading && !modalError && modalBinary && (
               <div className="file-modal-message">
                 Binary file — preview not available. Use the Dropbox button to open it.
+              </div>
+            )}
+            {!modalLoading && !modalError && modalPdfData && (
+              <div
+                ref={renderPdf}
+                style={{ padding: '12px', overflowY: 'auto', height: '100%', boxSizing: 'border-box', background: '#555' }}
+              />
+            )}
+            {!modalLoading && !modalError && modalImgUrl && (
+              <div style={{ padding: '12px', overflowY: 'auto', height: '100%', boxSizing: 'border-box', textAlign: 'center' }}>
+                <img
+                  src={modalImgUrl}
+                  alt={modalFile ? modalFile.name : ''}
+                  style={{ maxWidth: '100%', display: 'inline-block' }}
+                  ref={el => {
+                    if (!el) return;
+                    const scan = () => {
+                      const canvas = document.createElement('canvas');
+                      canvas.width = el.naturalWidth;
+                      canvas.height = el.naturalHeight;
+                      const ctx = canvas.getContext('2d');
+                      ctx.drawImage(el, 0, 0);
+                      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                      const code = window.jsQR && window.jsQR(imageData.data, canvas.width, canvas.height);
+                      setModalQrResult(code ? code.data : '');
+                    };
+                    if (el.complete) scan(); else el.addEventListener('load', scan, { once: true });
+                  }}
+                />
+                {modalQrResult && (
+                  <div style={{ marginTop: '8px' }}>
+                    <button
+                      onClick={() => navigator.clipboard.writeText(modalQrResult)}
+                      title={modalQrResult}
+                      style={{ fontSize: '22px', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 6px' }}
+                    >
+                      &#x1F4F7;
+                    </button>
+                    <span style={{ fontSize: '12px', color: '#aaa', wordBreak: 'break-all' }}>{modalQrResult}</span>
+                  </div>
+                )}
+                {modalQrResult === '' && (
+                  <div style={{ marginTop: '8px', fontSize: '12px', color: '#888' }}>No QR code found</div>
+                )}
               </div>
             )}
             {!modalLoading && !modalError && !modalBinary && modalEditMode && (
