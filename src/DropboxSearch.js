@@ -114,6 +114,7 @@ function DropboxSearch() {
   });
   const [dividerDragging, setDividerDragging] = useState(false);
   const panesContainerRef = useRef(null);
+  const [navPaneCollapsed, setNavPaneCollapsed] = useState(false);
 
   // Line navigation in the file pane: 0-based highlighted line + its input text
   const [lineNavCurLine, setLineNavCurLine] = useState(-1);
@@ -1125,13 +1126,26 @@ function DropboxSearch() {
               >
                 Play
               </button>
+              <button
+                className="tree-action-btn tree-toggle-nav-btn"
+                onClick={() => setNavPaneCollapsed(c => !c)}
+                title={navPaneCollapsed ? 'Show navigation pane' : 'Hide navigation pane'}
+              >
+                {navPaneCollapsed ? 'Show Nav' : 'Hide Nav'}
+              </button>
             </div>
           )}
 
           <div className="panes-container" ref={panesContainerRef}>
             <div
               className="tree-output"
-              style={modalFile ? { flex: 'none', width: `${paneRatio * 100}%` } : undefined}
+              style={
+                navPaneCollapsed
+                  ? { display: 'none' }
+                  : modalFile
+                  ? { flex: 'none', width: `${paneRatio * 100}%` }
+                  : undefined
+              }
             >
             {treePath && (
               <div className="tree-root-line">
@@ -1312,14 +1326,15 @@ function DropboxSearch() {
             )}
             </div>
 
-            {modalFile && (
-              <>
+            {modalFile && !navPaneCollapsed && (
                 <div
                   className={`pane-divider${dividerDragging ? ' dragging' : ''}`}
                   onMouseDown={startDividerDrag}
                   onDoubleClick={resetPaneRatio}
                   title="Drag to resize panes (double-click to reset)"
                 />
+            )}
+            {modalFile && (
                 <div className="pane-right">
           <div className="file-modal-topbar">
             {!modalLoading && !modalError && !modalBinary && !modalEditMode && !modalShowMd ? (
@@ -1509,7 +1524,6 @@ function DropboxSearch() {
             </>
           )}
                 </div>
-              </>
             )}
           </div>
         </div>

@@ -228,6 +228,20 @@
   color: #fff;
 }
 
+.tree-toggle-nav-btn {
+  opacity: 1 !important;
+  background: #1a2a1a;
+  color: #6fcf6f;
+  border-color: #3a6a3a;
+  padding: 4px 14px;
+  font-size: 13px;
+}
+
+.tree-toggle-nav-btn:hover {
+  background: #3a6a3a;
+  color: #fff;
+}
+
 /* Tree output area */
 .tree-output {
   flex: 1;
