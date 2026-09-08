@@ -145,6 +145,7 @@ function DropboxSearch() {
   const pdfContainerRef = useRef(null);
   const pdfRenderRef = useRef(null); // stores cancel fn for in-progress render
   const lineNavCurLineRef = useRef(-1);
+  const [savedLines, setSavedLines] = useState([]); // bookmarked line positions
 
   musicTracksRef.current = musicTracks;
   musicCurrentIdxRef.current = musicCurrentIdx;
@@ -571,10 +572,11 @@ function DropboxSearch() {
     }
   }, [modalFile, modalImgUrl]);
 
-  // Reset line cursor whenever the modal opens a new file
+  // Reset line cursor and bookmarks whenever the modal opens a new file
   useEffect(() => {
     lineNavCurLineRef.current = -1;
     setLineNavCurLine(-1);
+    setSavedLines([]);
   }, [modalFile]);
 
   // Keep the topbar line-number input in sync with ,/. and arrow-button navigation
@@ -663,6 +665,73 @@ function DropboxSearch() {
     const target = Math.floor(Number(lineNum)) - 1;
     if (isNaN(target)) return;
     highlightModalLine(target, false);
+  }, [highlightModalLine]);
+
+  // Read current line aloud without advancing
+  const readCurrentLine = useCallback(() => {
+    const preEl = modalPreRef.current;
+    if (!preEl) return;
+    const cur = lineNavCurLineRef.current;
+    if (cur < 0) return;
+    const text = preEl.textContent.split('\n')[cur]?.trim();
+    if (!text) return;
+    window.speechSynthesis.cancel();
+    const utt = new SpeechSynthesisUtterance(text);
+    utt.lang = 'en-US';
+    window.speechSynthesis.speak(utt);
+  }, []);
+
+  // Read current line aloud then advance one non-blank line and stop
+  const readAndStep = useCallback(() => {
+    const preEl = modalPreRef.current;
+    if (!preEl) return;
+    const lines = preEl.textContent.split('\n');
+    let cur = lineNavCurLineRef.current;
+    if (cur < 0) cur = 0;
+    // skip blank lines from current position
+    while (cur < lines.length && lines[cur].trim() === '') cur++;
+    if (cur >= lines.length) return;
+    highlightModalLine(cur, false);
+    window.speechSynthesis.cancel();
+    const utt = new SpeechSynthesisUtterance(lines[cur].trim());
+    utt.lang = 'en-US';
+    utt.onend = () => {
+      // advance to next non-blank line, then stop
+      let next = cur + 1;
+      while (next < lines.length && lines[next].trim() === '') next++;
+      if (next < lines.length) {
+        lineNavCurLineRef.current = next;
+        setLineNavCurLine(next);
+      }
+    };
+    window.speechSynthesis.speak(utt);
+  }, [highlightModalLine]);
+
+  // Save current line position as a bookmark
+  const saveCurrentLine = useCallback(() => {
+    const preEl = modalPreRef.current;
+    if (!preEl) return;
+    const cur = lineNavCurLineRef.current;
+    if (cur < 0) return;
+    const preview = preEl.textContent.split('\n')[cur]?.trim().slice(0, 40) || '';
+    setSavedLines(prev => {
+      if (prev.some(s => s.line === cur)) return prev; // no duplicates
+      return [...prev, { line: cur, preview }];
+    });
+  }, []);
+
+  // Jump to a saved line position
+  const jumpToSaved = useCallback((line) => {
+    highlightModalLine(line, false);
+  }, [highlightModalLine]);
+
+  // Reset to a target 0-based line (default -1 = clear)
+  const resetLineNav = useCallback((toLine = -1) => {
+    window.speechSynthesis.cancel();
+    lineNavCurLineRef.current = toLine;
+    setLineNavCurLine(toLine);
+    if (toLine < 0) setLineInputValue('');
+    else if (toLine >= 0) highlightModalLine(toLine, false);
   }, [highlightModalLine]);
 
   // Scroll the file-pane content down by one page
@@ -1339,7 +1408,7 @@ function DropboxSearch() {
           <div className="file-modal-topbar">
             {!modalLoading && !modalError && !modalBinary && !modalEditMode && !modalShowMd ? (
               <span className="file-modal-linenav">
-                Line
+                <button className="linenav-btn" onClick={() => navigateModalLine(-1, false)} title="Previous line">−</button>
                 <input
                   type="number"
                   className="file-modal-line-input"
@@ -1357,6 +1426,30 @@ function DropboxSearch() {
                 <span className="file-modal-line-total">
                   / {modalContent ? modalContent.split('\n').length : 0}
                 </span>
+                <button className="linenav-btn" onClick={() => navigateModalLine(1, false)} title="Next line">+</button>
+                <button className="linenav-btn linenav-read-btn" onClick={readCurrentLine} title="Read current line aloud">Read</button>
+                <button className="linenav-btn linenav-auto-btn" onClick={readAndStep} title="Read current line then advance">▶</button>
+                <button className="linenav-btn linenav-save-btn" onClick={saveCurrentLine} title="Bookmark current line">★</button>
+                {savedLines.length > 0 && (
+                  <select
+                    className="linenav-saved-select"
+                    defaultValue=""
+                    onChange={(e) => {
+                      const v = parseInt(e.target.value, 10);
+                      if (!isNaN(v)) jumpToSaved(v);
+                      e.target.value = '';
+                    }}
+                    title="Jump to a bookmarked line"
+                  >
+                    <option value="" disabled>Bookmarks</option>
+                    {savedLines.map((s) => (
+                      <option key={s.line} value={s.line}>
+                        L{s.line + 1}{s.preview ? `: ${s.preview}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <button className="linenav-btn linenav-reset-btn" onClick={() => resetLineNav()} title="Reset line position">Reset</button>
               </span>
             ) : (
               <span className="file-modal-linenav" />
