@@ -354,6 +354,18 @@ function DropboxSearch() {
     }
   }, [accessToken, listFolder]);
 
+  // Auto-load the root folder listing as soon as sign-in completes, so the
+  // tree pane isn't blank until the user manually loads a path. Use depth 1
+  // here regardless of the selected treeDepth — a deeper initial load can
+  // take several seconds since it recurses into every subfolder.
+  useEffect(() => {
+    if (accessToken) {
+      loadTree('', 1);
+    }
+    // Only re-run when the token itself changes (i.e. on sign-in).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accessToken]);
+
   const handlePathKeyPress = (e) => {
     if (e.key === 'Enter') {
       handleLoadTree();
