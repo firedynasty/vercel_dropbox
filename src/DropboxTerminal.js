@@ -15,6 +15,7 @@ const DEFAULT_ALIASES = {
   l: 'ls',
   cat: 'open',
   opens: "open -a 'google chrome'",
+  c: 'cd',
   '..': 'cd ..',
   trees: `echo 'tree -d -L 2 -I "node_modules"'`,
   // The old folder presets
