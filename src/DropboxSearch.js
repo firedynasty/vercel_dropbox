@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { marked } from 'marked';
 import { parseRTF } from '@jonahschulte/rtf-toolkit';
+import DropboxTerminal from './DropboxTerminal';
 
 // Extract plain text from an RTF document: text nodes carry their content,
 // paragraphs become newlines
@@ -17,12 +18,6 @@ const rtfToPlainText = (rtf) => {
 };
 
 const APP_KEY = process.env.REACT_APP_DROPBOX_APP_KEY;
-
-const FOLDER_PRESETS = {
-  'Videos': '/videos',
-  'Chess Reports': '/chess/reports',
-  'Literature': '/literature/papers',
-};
 
 const REDIRECT_URI = window.location.origin;
 
@@ -79,16 +74,6 @@ function DropboxSearch() {
   const [accessToken, setAccessToken] = useState(null);
   const [status, setStatus] = useState('');
 
-  // Tree view state
-  const [treePath, setTreePath] = useState('');
-  const [treeDepth, setTreeDepth] = useState(2);
-  const [treeExclude, setTreeExclude] = useState('');
-  const [treeFoldersOnly, setTreeFoldersOnly] = useState(false);
-  const [treeLines, setTreeLines] = useState([]);
-  const [treeLoading, setTreeLoading] = useState(false);
-  const [treeSummary, setTreeSummary] = useState('');
-  const [lastMovePath, setLastMovePath] = useState('');
-
   // File view/edit modal state
   const [modalFile, setModalFile] = useState(null);
   const [modalContent, setModalContent] = useState('');
@@ -114,7 +99,6 @@ function DropboxSearch() {
   });
   const [dividerDragging, setDividerDragging] = useState(false);
   const panesContainerRef = useRef(null);
-  const [navPaneCollapsed, setNavPaneCollapsed] = useState(false);
 
   // Line navigation in the file pane: 0-based highlighted line + its input text
   const [lineNavCurLine, setLineNavCurLine] = useState(-1);
@@ -207,9 +191,6 @@ function DropboxSearch() {
         // Ignore revoke errors
       }
       setAccessToken(null);
-      setTreeLines([]);
-      setTreeSummary('');
-      setTreePath('');
       setStatus('Signed out');
     }
   };
@@ -267,110 +248,6 @@ function DropboxSearch() {
     }));
   }, [accessToken]);
 
-  const loadTree = useCallback(async (rootPath, maxDepth) => {
-    if (!accessToken) return;
-
-    setTreeLoading(true);
-    setTreeLines([]);
-    setTreeSummary('');
-
-    try {
-      // Build tree recursively
-      const buildNode = async (path, currentDepth) => {
-        setStatus(`Loading tree... (depth ${currentDepth}/${maxDepth})`);
-        const entries = await listFolder(path);
-
-        // Sort: folders first, then alphabetically
-        entries.sort((a, b) => {
-          if (a.isFolder !== b.isFolder) return a.isFolder ? -1 : 1;
-          return a.name.localeCompare(b.name);
-        });
-
-        const nodes = [];
-        for (const entry of entries) {
-          const node = {
-            name: entry.name,
-            pathDisplay: entry.pathDisplay,
-            isFolder: entry.isFolder,
-            children: [],
-          };
-
-          if (entry.isFolder && currentDepth < maxDepth) {
-            try {
-              node.children = await buildNode(entry.pathDisplay, currentDepth + 1);
-            } catch {
-              // If a subfolder fails, just show it without children
-            }
-          }
-
-          nodes.push(node);
-        }
-
-        return nodes;
-      };
-
-      const tree = await buildNode(rootPath || '', 1);
-
-      // Flatten tree into renderable lines
-      const lines = [];
-      let dirCount = 0;
-      let fileCount = 0;
-
-      const flatten = (nodes, prefix) => {
-        nodes.forEach((node, index) => {
-          const isLast = index === nodes.length - 1;
-          const connector = isLast ? '\u2514\u2500\u2500 ' : '\u251C\u2500\u2500 ';
-          const icon = node.isFolder ? '\uD83D\uDCC1' : '\uD83D\uDCC4';
-          const dropboxUrl = `https://www.dropbox.com/home${node.pathDisplay}`;
-
-          if (node.isFolder) dirCount++;
-          else fileCount++;
-
-          lines.push({
-            prefix: prefix + connector,
-            icon,
-            name: node.name,
-            pathDisplay: node.pathDisplay,
-            isFolder: node.isFolder,
-            url: dropboxUrl,
-          });
-
-          if (node.children.length > 0) {
-            const childPrefix = prefix + (isLast ? '    ' : '\u2502   ');
-            flatten(node.children, childPrefix);
-          }
-        });
-      };
-
-      flatten(tree, '');
-
-      setTreeLines(lines);
-      setTreeSummary(`${dirCount} directories, ${fileCount} files`);
-      setStatus(`Tree loaded: ${dirCount} directories, ${fileCount} files`);
-    } catch (error) {
-      setStatus('Error loading tree: ' + error.message);
-    } finally {
-      setTreeLoading(false);
-    }
-  }, [accessToken, listFolder]);
-
-  // Auto-load the root folder listing as soon as sign-in completes, so the
-  // tree pane isn't blank until the user manually loads a path. Use depth 1
-  // here regardless of the selected treeDepth — a deeper initial load can
-  // take several seconds since it recurses into every subfolder.
-  useEffect(() => {
-    if (accessToken) {
-      loadTree('', 1);
-    }
-    // Only re-run when the token itself changes (i.e. on sign-in).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accessToken]);
-
-  const handlePathKeyPress = (e) => {
-    if (e.key === 'Enter') {
-      handleLoadTree();
-    }
-  };
 
   // Open a file in the full-screen view/edit modal
   const openFileModal = useCallback(async (line) => {
@@ -429,35 +306,6 @@ function DropboxSearch() {
     }
   }, [accessToken]);
 
-  // Path input submit: if the path points to a specific file, grab that file
-  // directly in the view/edit modal; otherwise load it as a folder tree.
-  const handleLoadTree = useCallback(async () => {
-    let path = treePath.trim().replace(/\/+$/, '');
-    // Dropbox requires paths to start with '/' (root is the empty string "")
-    if (path && !path.startsWith('/')) path = '/' + path;
-    if (path && accessToken) {
-      try {
-        const res = await fetch('https://api.dropboxapi.com/2/files/get_metadata', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ path }),
-        });
-        if (res.ok) {
-          const meta = await res.json();
-          if (meta['.tag'] === 'file') {
-            openFileModal({ name: meta.name, pathDisplay: meta.path_display });
-            return;
-          }
-        }
-      } catch {
-        // Metadata lookup failed — fall through to tree load
-      }
-    }
-    loadTree(path, treeDepth);
-  }, [treePath, treeDepth, loadTree, accessToken, openFileModal]);
 
   // Copy the modal's file contents to the clipboard
   const copyModalContent = useCallback(async () => {
@@ -501,10 +349,9 @@ function DropboxSearch() {
       } else {
         setStatus(isRtf ? `Saved as: ${savePath}` : `Saved: ${savePath}`);
         if (isRtf) {
-          // Point the pane at the new .txt and refresh the tree so it appears
+          // Point the pane at the new .txt (run ls in the shell to see it listed)
           const txtName = savePath.substring(savePath.lastIndexOf('/') + 1);
           setModalFile({ name: txtName, pathDisplay: savePath });
-          loadTree(treePath.trim().replace(/\/+$/, ''), treeDepth);
         }
         setModalEditMode(false);
       }
@@ -513,7 +360,7 @@ function DropboxSearch() {
     } finally {
       setModalSaving(false);
     }
-  }, [accessToken, modalFile, modalContent, modalSaving, loadTree, treePath, treeDepth]);
+  }, [accessToken, modalFile, modalContent, modalSaving]);
 
   // Drag the center divider to resize the two panes; double-click resets the ratio
   const startDividerDrag = useCallback((e) => {
@@ -1016,31 +863,6 @@ function DropboxSearch() {
 
   // ──────────────────────────────────────────────────────────────────────────
 
-  // Apply filters for display
-  const excludeLower = treeExclude.trim().toLowerCase();
-  const displayLines = treeLines.filter((line) => {
-    // Folders-only filter
-    if (treeFoldersOnly && !line.isFolder) return false;
-
-    // Exclude filter: hide matching folder and its children
-    if (excludeLower) {
-      // Check if this line's path contains an excluded folder segment
-      const segments = line.pathDisplay.toLowerCase().split('/');
-      if (segments.some((seg) => seg === excludeLower)) return false;
-    }
-
-    return true;
-  });
-
-  // Recount for summary after filters
-  const filteredDirCount = displayLines.filter((l) => l.isFolder).length;
-  const filteredFileCount = displayLines.filter((l) => !l.isFolder).length;
-  const displaySummary = (excludeLower || treeFoldersOnly)
-    ? (treeFoldersOnly
-      ? `${filteredDirCount} directories`
-      : `${filteredDirCount} directories, ${filteredFileCount} files`)
-    : treeSummary;
-
   if (!APP_KEY) {
     return (
       <div className="dropbox-search">
@@ -1074,340 +896,23 @@ function DropboxSearch() {
 
       {accessToken && (
         <div className="tree-container">
-          <div className="tree-controls">
-            <input
-              type="text"
-              className="tree-path-input"
-              value={treePath}
-              onChange={(e) => setTreePath(e.target.value)}
-              onKeyPress={handlePathKeyPress}
-              placeholder="Path (e.g. /videos)..."
-              autoFocus
-            />
-            <select
-              className="tree-preset-select"
-              onChange={(e) => {
-                const path = e.target.value;
-                if (!path) return;
-                setTreePath(path);
-                loadTree(path.replace(/\/+$/, ''), treeDepth);
-              }}
-              value=""
-            >
-              <option value="">-- Presets --</option>
-              {Object.entries(FOLDER_PRESETS).map(([label, path]) => (
-                <option key={path} value={path}>{label}</option>
-              ))}
-            </select>
-            <select
-              className="tree-depth-select"
-              value={treeDepth}
-              onChange={(e) => setTreeDepth(Number(e.target.value))}
-            >
-              <option value={1}>Depth 1</option>
-              <option value={2}>Depth 2</option>
-              <option value={3}>Depth 3</option>
-            </select>
-            <input
-              type="text"
-              className="tree-exclude-input"
-              value={treeExclude}
-              onChange={(e) => setTreeExclude(e.target.value)}
-              placeholder="Exclude folder..."
-            />
-            <label className="tree-folders-only">
-              <input
-                type="checkbox"
-                checked={treeFoldersOnly}
-                onChange={(e) => setTreeFoldersOnly(e.target.checked)}
-              />
-              Folders only
-            </label>
-            <button
-              className="tree-load-btn"
-              onClick={handleLoadTree}
-              disabled={treeLoading}
-            >
-              {treeLoading ? 'Loading...' : 'Load Tree'}
-            </button>
-          </div>
-
           {status && <div className="status">{status}</div>}
-
-          {displayLines.length > 0 && (
-            <div className="tree-download-row">
-              <button
-                className="tree-action-btn tree-download-btn"
-                onClick={() => {
-                  const root = treePath || '/';
-                  const textLines = [root];
-                  displayLines.forEach((line) => {
-                    textLines.push(line.prefix + line.name);
-                  });
-                  if (displaySummary) {
-                    textLines.push('');
-                    textLines.push(displaySummary);
-                  }
-                  const blob = new Blob([textLines.join('\n')], { type: 'text/plain' });
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement('a');
-                  a.href = url;
-                  const safeName = (treePath || 'root').replace(/\//g, '_').replace(/^_/, '');
-                  a.download = `tree_${safeName}.txt`;
-                  a.click();
-                  URL.revokeObjectURL(url);
-                }}
-              >
-                Download .txt
-              </button>
-              <button
-                className="tree-action-btn tree-newfile-btn"
-                onClick={async () => {
-                  let filename = window.prompt('New file name:', 'untitled.txt');
-                  if (!filename) return;
-                  if (!filename.includes('.')) filename += '.txt';
-                  const dir = treePath.trim().replace(/\/+$/, '') || '';
-                  const fullPath = dir ? `${dir}/${filename}` : `/${filename}`;
-                  try {
-                    const res = await fetch('https://content.dropboxapi.com/2/files/upload', {
-                      method: 'POST',
-                      headers: {
-                        Authorization: `Bearer ${accessToken}`,
-                        'Content-Type': 'application/octet-stream',
-                        'Dropbox-API-Arg': JSON.stringify({
-                          path: fullPath,
-                          mode: 'add',
-                          autorename: true,
-                          mute: false,
-                        }),
-                      },
-                      body: new Blob(['hello world']),
-                    });
-                    if (!res.ok) {
-                      const err = await res.json().catch(() => ({}));
-                      setStatus('Error creating file: ' + (err.error_summary || `HTTP ${res.status}`));
-                    } else {
-                      const data = await res.json();
-                      setStatus(`Created: ${data.path_display}`);
-                      loadTree(treePath.trim().replace(/\/+$/, ''), treeDepth);
-                    }
-                  } catch (err) {
-                    setStatus('Error creating file: ' + err.message);
-                  }
-                }}
-              >
-                New File
-              </button>
-              <button
-                className="tree-action-btn tree-play-btn"
-                onClick={() => {
-                  const folderName = treePath.split('/').filter(Boolean).pop() || treePath || 'root';
-                  openMusicPlayer(treePath.trim().replace(/\/+$/, '') || '', folderName);
-                }}
-              >
-                Play
-              </button>
-              <button
-                className="tree-action-btn tree-toggle-nav-btn"
-                onClick={() => setNavPaneCollapsed(c => !c)}
-                title={navPaneCollapsed ? 'Show navigation pane' : 'Hide navigation pane'}
-              >
-                {navPaneCollapsed ? 'Show Nav' : 'Hide Nav'}
-              </button>
-            </div>
-          )}
 
           <div className="panes-container" ref={panesContainerRef}>
             <div
-              className="tree-output"
-              style={
-                navPaneCollapsed
-                  ? { display: 'none' }
-                  : modalFile
-                  ? { flex: 'none', width: `${paneRatio * 100}%` }
-                  : undefined
-              }
+              className="tree-output term-pane"
+              style={modalFile ? { flex: 'none', width: `${paneRatio * 100}%` } : undefined}
             >
-            {treePath && (
-              <div className="tree-root-line">
-                {treePath.includes('/') && treePath !== '/' && (
-                  <button
-                    className="tree-up-btn"
-                    onClick={() => {
-                      const parent = treePath.substring(0, treePath.lastIndexOf('/')) || '';
-                      setTreePath(parent);
-                      loadTree(parent, treeDepth);
-                    }}
-                    title="Go up one directory"
-                  >
-                    &uarr; Up
-                  </button>
-                )}
-                {treePath}
-              </div>
-            )}
-            {displayLines.map((line, idx) => (
-              <div
-                key={idx}
-                className={`tree-line${modalFile && modalFile.pathDisplay === line.pathDisplay ? ' active' : ''}${line.isFolder ? '' : ' tree-line-clickable'}`}
-                onClick={line.isFolder ? undefined : () => openFileModal(line)}
-              >
-                <span className="tree-connector">{line.prefix}</span>
-                <span className="tree-icon">{line.icon}</span>
-                <span
-                  className={line.isFolder ? 'tree-name-text' : 'tree-name-text tree-name-clickable'}
-                  title={line.isFolder ? undefined : `View/edit ${line.pathDisplay}`}
-                >
-                  {line.name}
-                </span>
-                {line.isFolder && (
-                  <>
-                    <button
-                      className="tree-action-btn tree-browse-btn"
-                      onClick={() => {
-                        setTreePath(line.pathDisplay);
-                        loadTree(line.pathDisplay, treeDepth);
-                      }}
-                      title={`Browse ${line.pathDisplay}`}
-                    >
-                      Browse
-                    </button>
-                    <button
-                      className="tree-action-btn tree-play-btn"
-                      onClick={() => openMusicPlayer(line.pathDisplay, line.name)}
-                      title={`Play music in ${line.pathDisplay}`}
-                    >
-                      Play
-                    </button>
-                  </>
-                )}
-                {line.isFolder ? (
-                  <a
-                    href={line.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="tree-action-btn tree-open-btn"
-                    title={line.url}
-                  >
-                    Open
-                  </a>
-                ) : (
-                  <button
-                    className="tree-action-btn tree-open-btn"
-                    onClick={(e) => { e.stopPropagation(); openFileModal(line); }}
-                    title={`View/edit ${line.pathDisplay}`}
-                  >
-                    Open
-                  </button>
-                )}
-                <button
-                  className="tree-action-btn tree-rename-btn"
-                  onClick={async (e) => {
-                    e.stopPropagation();
-                    const newName = window.prompt('Rename to:', line.name);
-                    if (!newName || newName === line.name) return;
-                    const parentDir = line.pathDisplay.substring(0, line.pathDisplay.lastIndexOf('/'));
-                    const toPath = `${parentDir}/${newName}`;
-                    try {
-                      const res = await fetch('https://api.dropboxapi.com/2/files/move_v2', {
-                        method: 'POST',
-                        headers: {
-                          Authorization: `Bearer ${accessToken}`,
-                          'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({ from_path: line.pathDisplay, to_path: toPath, autorename: false }),
-                      });
-                      if (!res.ok) {
-                        const err = await res.json().catch(() => ({}));
-                        setStatus('Rename failed: ' + (err.error_summary || `HTTP ${res.status}`));
-                      } else {
-                        setStatus(`Renamed to: ${toPath}`);
-                        loadTree(treePath.trim().replace(/\/+$/, ''), treeDepth);
-                      }
-                    } catch (err) {
-                      setStatus('Rename error: ' + err.message);
-                    }
-                  }}
-                  title="Rename"
-                >
-                  Rename
-                </button>
-                <button
-                  className="tree-action-btn tree-move-btn"
-                  onClick={async (e) => {
-                    e.stopPropagation();
-                    const destDir = window.prompt('Move to folder (or type "delete" to delete):', lastMovePath || '/');
-                    if (!destDir) return;
-
-                    // Typing "delete" deletes the file/folder instead of moving it
-                    if (destDir.trim().toLowerCase() === 'delete') {
-                      if (!window.confirm(`Delete ${line.pathDisplay}?`)) return;
-                      try {
-                        const res = await fetch('https://api.dropboxapi.com/2/files/delete_v2', {
-                          method: 'POST',
-                          headers: {
-                            Authorization: `Bearer ${accessToken}`,
-                            'Content-Type': 'application/json',
-                          },
-                          body: JSON.stringify({ path: line.pathDisplay }),
-                        });
-                        if (!res.ok) {
-                          const err = await res.json().catch(() => ({}));
-                          setStatus('Delete failed: ' + (err.error_summary || `HTTP ${res.status}`));
-                        } else {
-                          setStatus(`Deleted: ${line.pathDisplay}`);
-                          // Close pane 2 if the deleted file is open there
-                          if (modalFile && modalFile.pathDisplay === line.pathDisplay) setModalFile(null);
-                          loadTree(treePath.trim().replace(/\/+$/, ''), treeDepth);
-                        }
-                      } catch (err) {
-                        setStatus('Delete error: ' + err.message);
-                      }
-                      return;
-                    }
-
-                    const normalizedDest = destDir.trim().replace(/\/+$/, '');
-                    const toPath = `${normalizedDest}/${line.name}`;
-                    try {
-                      const res = await fetch('https://api.dropboxapi.com/2/files/move_v2', {
-                        method: 'POST',
-                        headers: {
-                          Authorization: `Bearer ${accessToken}`,
-                          'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({ from_path: line.pathDisplay, to_path: toPath, autorename: false }),
-                      });
-                      if (!res.ok) {
-                        const err = await res.json().catch(() => ({}));
-                        setStatus('Move failed: ' + (err.error_summary || `HTTP ${res.status}`));
-                      } else {
-                        setLastMovePath(normalizedDest);
-                        setStatus(`Moved to: ${toPath}`);
-                        loadTree(treePath.trim().replace(/\/+$/, ''), treeDepth);
-                      }
-                    } catch (err) {
-                      setStatus('Move error: ' + err.message);
-                    }
-                  }}
-                  title="Move (or type &quot;delete&quot; to delete)"
-                >
-                  Move
-                </button>
-              </div>
-            ))}
-            {displayLines.length > 0 && displaySummary && (
-              <div className="tree-summary">
-                {'\n'}{displaySummary}
-              </div>
-            )}
-            {!treeLoading && treeLines.length === 0 && !status && (
-              <div className="tree-empty">
-                Enter a path or select a preset, then click Load Tree.
-              </div>
-            )}
+              <DropboxTerminal
+                accessToken={accessToken}
+                openFile={openFileModal}
+                playMusic={openMusicPlayer}
+                visible
+                modalOpen={!!modalFile}
+              />
             </div>
 
-            {modalFile && !navPaneCollapsed && (
+            {modalFile && (
                 <div
                   className={`pane-divider${dividerDragging ? ' dragging' : ''}`}
                   onMouseDown={startDividerDrag}
