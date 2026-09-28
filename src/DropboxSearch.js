@@ -21,6 +21,14 @@ const APP_KEY = process.env.REACT_APP_DROPBOX_APP_KEY;
 
 const REDIRECT_URI = window.location.origin;
 
+const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'avif']);
+
+// Images the file pane can preview (svg excluded — a blob without an image MIME type won't render)
+const isViewableImage = (name) => {
+  const ext = name.split('.').pop().toLowerCase();
+  return ext !== 'svg' && IMAGE_EXTENSIONS.has(ext);
+};
+
 const AUDIO_EXTENSIONS = new Set(['mp3', 'wav', 'flac', 'm4a', 'aac', 'ogg', 'opus', 'wma', 'aiff', 'aif']);
 
 // Parse a timestamp text block into chapters: "MM:SS Title" or "H:MM:SS Title"
@@ -117,6 +125,21 @@ function DropboxSearch() {
   const [musicVolume, setMusicVolume] = useState(80);
   const [musicUrlLoading, setMusicUrlLoading] = useState(false);
   const [musicChapters, setMusicChapters] = useState([]); // parsed chapters for current track
+
+  // Image gallery / slideshow state
+  const [galleryModal, setGalleryModal] = useState(null); // { folderPath, folderName }
+  const [galleryImages, setGalleryImages] = useState([]);
+  const [galleryIdx, setGalleryIdx] = useState(0);
+  const [galleryUrl, setGalleryUrl] = useState('');
+  const [galleryLoading, setGalleryLoading] = useState(false);
+  const [galleryError, setGalleryError] = useState('');
+  const [galleryAuto, setGalleryAuto] = useState(false);
+  const galleryLinksRef = useRef({}); // pathDisplay → temporary link
+  const galleryTouchRef = useRef(null);
+
+  // Sibling images of the image open in the file pane, for the « / » buttons and ← / → keys
+  const [imageSiblings, setImageSiblings] = useState([]);
+  const siblingsFolderRef = useRef('');
 
   // Refs for audio element and stale-closure-safe access to state
   const musicAudioRef = useRef(null);
@@ -253,7 +276,7 @@ function DropboxSearch() {
   const openFileModal = useCallback(async (line) => {
     const nameLower = line.name.toLowerCase();
     const isPdf = nameLower.endsWith('.pdf');
-    const isImg = nameLower.endsWith('.png') || nameLower.endsWith('.jpg') || nameLower.endsWith('.jpeg');
+    const isImg = isViewableImage(line.name);
 
     setModalFile({ name: line.name, pathDisplay: line.pathDisplay });
     setModalContent('');
@@ -600,11 +623,56 @@ function DropboxSearch() {
     preEl.scrollBy({ top: preEl.clientHeight * 0.9, behavior: 'smooth' });
   }, []);
 
+  // Sibling images of whatever image is open in the file pane (re-listed only when the folder changes)
+  useEffect(() => {
+    if (!modalFile || !isViewableImage(modalFile.name)) {
+      siblingsFolderRef.current = '';
+      setImageSiblings([]);
+      return;
+    }
+    const folder = modalFile.pathDisplay.slice(0, modalFile.pathDisplay.lastIndexOf('/'));
+    if (siblingsFolderRef.current === folder.toLowerCase()) return;
+    siblingsFolderRef.current = folder.toLowerCase();
+    let cancelled = false;
+    listFolder(folder)
+      .then((entries) => {
+        if (cancelled) return;
+        setImageSiblings(
+          entries
+            .filter((e) => !e.isFolder && isViewableImage(e.name))
+            .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
+        );
+      })
+      .catch(() => { if (!cancelled) setImageSiblings([]); });
+    return () => { cancelled = true; };
+  }, [modalFile, listFolder]);
+
+  const imageIdx = modalFile
+    ? imageSiblings.findIndex((e) => e.pathDisplay.toLowerCase() === modalFile.pathDisplay.toLowerCase())
+    : -1;
+
+  // « / »: open the previous/next image in the same folder (wraps around)
+  const stepImage = useCallback((delta) => {
+    if (imageIdx < 0 || imageSiblings.length < 2) return;
+    const next = imageSiblings[(imageIdx + delta + imageSiblings.length) % imageSiblings.length];
+    openFileModal(next);
+  }, [imageIdx, imageSiblings, openFileModal]);
+
   // Keyboard shortcuts when file modal is open
   useEffect(() => {
     if (!modalFile) return;
     const handleKey = (e) => {
       if (e.key === 'Escape') { setModalFile(null); return; }
+      // ← / → browse sibling images; also works from an empty shell prompt, where the keys do nothing else
+      if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && imageIdx >= 0 && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        const t = e.target;
+        const emptyShell = t.classList?.contains('term-input') && !t.value;
+        if (emptyShell || !['INPUT', 'SELECT', 'TEXTAREA'].includes(t.tagName)) {
+          e.preventDefault();
+          stepImage(e.key === 'ArrowLeft' ? -1 : 1);
+          return;
+        }
+      }
       if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
       if (!e.metaKey && !e.ctrlKey && !e.altKey && !modalEditMode && !modalShowMd) {
         if (e.key === ',' || e.key === '.') {
@@ -625,7 +693,7 @@ function DropboxSearch() {
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [modalFile, modalEditMode, modalShowMd, navigateModalLine]);
+  }, [modalFile, modalEditMode, modalShowMd, navigateModalLine, imageIdx, stepImage]);
 
   // ─── Music player logic ────────────────────────────────────────────────────
 
@@ -861,6 +929,107 @@ function DropboxSearch() {
     [musicDuration]
   );
 
+  // ─── Image gallery logic ───────────────────────────────────────────────────
+
+  const getGalleryLink = useCallback(async (path) => {
+    const cache = galleryLinksRef.current;
+    if (cache[path]) return cache[path];
+    const res = await fetch('https://api.dropboxapi.com/2/files/get_temporary_link', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ path }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error_summary || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    cache[path] = data.link;
+    return data.link;
+  }, [accessToken]);
+
+  // Open the gallery for a folder: list its images (natural name order) and show the first
+  const openGallery = useCallback(async (folderPath, folderName) => {
+    setGalleryModal({ folderPath, folderName });
+    setGalleryImages([]);
+    setGalleryIdx(0);
+    setGalleryUrl('');
+    setGalleryError('');
+    setGalleryAuto(false);
+    setGalleryLoading(true);
+    galleryLinksRef.current = {};
+    if (document.activeElement) document.activeElement.blur();
+    try {
+      const entries = await listFolder(folderPath);
+      const images = entries
+        .filter((e) => !e.isFolder && IMAGE_EXTENSIONS.has(e.name.split('.').pop().toLowerCase()))
+        .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+      if (images.length === 0) setGalleryError('No images found in this folder.');
+      else setGalleryImages(images);
+    } catch (err) {
+      setGalleryError('Error loading folder: ' + err.message);
+    } finally {
+      setGalleryLoading(false);
+    }
+  }, [listFolder]);
+
+  const closeGallery = useCallback(() => {
+    setGalleryModal(null);
+    setGalleryImages([]);
+    setGalleryUrl('');
+    setGalleryError('');
+    setGalleryAuto(false);
+    galleryLinksRef.current = {};
+  }, []);
+
+  const stepGallery = useCallback((delta) => {
+    setGalleryIdx((i) => {
+      const n = galleryImages.length;
+      return n ? (i + delta + n) % n : 0;
+    });
+  }, [galleryImages.length]);
+
+  // Load the current image's link and warm the browser cache for its neighbours
+  useEffect(() => {
+    if (!galleryModal || galleryImages.length === 0) return;
+    let cancelled = false;
+    setGalleryError('');
+    getGalleryLink(galleryImages[galleryIdx].pathDisplay)
+      .then((url) => {
+        if (cancelled) return;
+        setGalleryUrl(url);
+        [1, -1].forEach((d) => {
+          const n = galleryImages[galleryIdx + d];
+          if (n) getGalleryLink(n.pathDisplay).then((u) => { new Image().src = u; }).catch(() => {});
+        });
+      })
+      .catch((err) => { if (!cancelled) setGalleryError('Error loading image: ' + err.message); });
+    return () => { cancelled = true; };
+  }, [galleryModal, galleryImages, galleryIdx, getGalleryLink]);
+
+  // Slideshow autoplay
+  useEffect(() => {
+    if (!galleryModal || !galleryAuto) return;
+    const t = setInterval(() => stepGallery(1), 4000);
+    return () => clearInterval(t);
+  }, [galleryModal, galleryAuto, stepGallery]);
+
+  // ← / → browse, Space toggles the slideshow, Esc closes
+  useEffect(() => {
+    if (!galleryModal) return;
+    const handleKey = (e) => {
+      if (e.key === 'Escape') { closeGallery(); e.stopPropagation(); }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); stepGallery(-1); }
+      else if (e.key === 'ArrowRight') { e.preventDefault(); stepGallery(1); }
+      else if (e.key === ' ') { e.preventDefault(); setGalleryAuto((a) => !a); }
+    };
+    window.addEventListener('keydown', handleKey, true);
+    return () => window.removeEventListener('keydown', handleKey, true);
+  }, [galleryModal, closeGallery, stepGallery]);
+
   // ──────────────────────────────────────────────────────────────────────────
 
   if (!APP_KEY) {
@@ -907,8 +1076,9 @@ function DropboxSearch() {
                 accessToken={accessToken}
                 openFile={openFileModal}
                 playMusic={openMusicPlayer}
+                showGallery={openGallery}
                 visible
-                modalOpen={!!modalFile}
+                modalOpen={!!modalFile || !!galleryModal}
               />
             </div>
 
@@ -923,7 +1093,18 @@ function DropboxSearch() {
             {modalFile && (
                 <div className="pane-right">
           <div className="file-modal-topbar">
-            {!modalLoading && !modalError && !modalBinary && !modalEditMode && !modalShowMd ? (
+            {imageIdx >= 0 || (modalFile && isViewableImage(modalFile.name)) ? (
+              <span className="file-modal-linenav">
+                {imageSiblings.length > 1 && (
+                  <>
+                    <button className="linenav-btn" onClick={() => stepImage(-1)} title="Previous image (←)">&laquo;</button>
+                    <span className="file-modal-line-total">{imageIdx + 1} / {imageSiblings.length}</span>
+                    <button className="linenav-btn" onClick={() => stepImage(1)} title="Next image (→)">&raquo;</button>
+                  </>
+                )}
+                <span className="file-modal-img-name" title={modalFile.pathDisplay}>{modalFile.name}</span>
+              </span>
+            ) : !modalLoading && !modalError && !modalBinary && !modalEditMode && !modalShowMd ? (
               <span className="file-modal-linenav">
                 <button className="linenav-btn" onClick={() => navigateModalLine(-1, false)} title="Previous line">−</button>
                 <input
@@ -981,7 +1162,7 @@ function DropboxSearch() {
                   &#x1F4F7;
                 </button>
               )}
-              {!modalLoading && !modalBinary && !modalError && (
+              {!modalLoading && !modalBinary && !modalError && !(modalFile && isViewableImage(modalFile.name)) && (
                 <button
                   className="file-modal-copy-btn"
                   onClick={copyModalContent}
@@ -990,7 +1171,7 @@ function DropboxSearch() {
                   {modalCopied ? 'Copied!' : 'Copy'}
                 </button>
               )}
-              {!modalLoading && !modalBinary && !modalError && !modalEditMode && (
+              {!modalLoading && !modalBinary && !modalError && !modalEditMode && !(modalFile && isViewableImage(modalFile.name)) && (
                 <button
                   className="file-modal-txtmd-btn"
                   onClick={() => setModalShowMd((v) => !v)}
@@ -1003,7 +1184,7 @@ function DropboxSearch() {
                   {modalShowMd ? 'MD>TXT' : 'TXT>MD'}
                 </button>
               )}
-              {!modalLoading && !modalBinary && !modalError && !modalEditMode && (
+              {!modalLoading && !modalBinary && !modalError && !modalEditMode && !(modalFile && isViewableImage(modalFile.name)) && (
                 <button
                   className="file-modal-edit-btn"
                   onClick={() => { setModalShowMd(false); setModalEditMode(true); }}
@@ -1113,12 +1294,12 @@ function DropboxSearch() {
                 dangerouslySetInnerHTML={{ __html: marked.parse(modalContent) }}
               />
             )}
-            {!modalLoading && !modalError && !modalBinary && !modalEditMode && !modalShowMd && (
+            {!modalLoading && !modalError && !modalBinary && !modalEditMode && !modalShowMd && !(modalFile && isViewableImage(modalFile.name)) && (
               <pre className="file-modal-pre" ref={modalPreRef}>{modalContent}</pre>
             )}
           </div>
           {/* Line navigation floating buttons — visible when viewing pre content */}
-          {!modalLoading && !modalError && !modalBinary && !modalEditMode && !modalShowMd && (
+          {!modalLoading && !modalError && !modalBinary && !modalEditMode && !modalShowMd && !(modalFile && isViewableImage(modalFile.name)) && (
             <>
               {/* Highlight + TTS ↑↓ — amber border, right side */}
               <button style={{position:'absolute',right:'6px',top:'calc(50% - 60px)',transform:'translateY(-50%)',zIndex:5,width:'48px',height:'48px',background:'rgba(255,255,255,0.08)',borderRadius:'50%',border:'1.5px solid rgba(255,200,50,0.8)',opacity:0.15,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',padding:0,transition:'opacity 0.2s'}} onMouseDown={e=>{e.preventDefault();navigateModalLine(-1,true);}} onMouseEnter={e=>e.currentTarget.style.opacity='0.55'} onMouseLeave={e=>e.currentTarget.style.opacity='0.15'} title="Highlight prev line & speak (r)">
@@ -1136,6 +1317,58 @@ function DropboxSearch() {
                 </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* ── Image Gallery / Slideshow ── */}
+      {galleryModal && (
+        <div className="gallery-modal">
+          <div className="gallery-header">
+            <span className="gallery-title" title={galleryModal.folderPath}>
+              🖼 {galleryModal.folderName}
+            </span>
+            {galleryImages.length > 0 && (
+              <span className="gallery-counter">{galleryIdx + 1} / {galleryImages.length}</span>
+            )}
+            <span className="gallery-actions">
+              {galleryImages.length > 1 && (
+                <button
+                  className={`gallery-btn${galleryAuto ? ' active' : ''}`}
+                  onClick={() => setGalleryAuto((a) => !a)}
+                  title="Toggle slideshow (space)"
+                >
+                  {galleryAuto ? '⏸ Slideshow' : '▶ Slideshow'}
+                </button>
+              )}
+              <button className="gallery-btn" onClick={closeGallery} title="Close (esc)">&times;</button>
+            </span>
+          </div>
+          <div
+            className="gallery-stage"
+            onTouchStart={(e) => { galleryTouchRef.current = e.touches[0].clientX; }}
+            onTouchEnd={(e) => {
+              const start = galleryTouchRef.current;
+              galleryTouchRef.current = null;
+              if (start === null) return;
+              const dx = e.changedTouches[0].clientX - start;
+              if (Math.abs(dx) > 50) stepGallery(dx < 0 ? 1 : -1);
+            }}
+          >
+            {galleryLoading && <div className="gallery-msg">Loading images...</div>}
+            {galleryError && <div className="gallery-msg gallery-error">{galleryError}</div>}
+            {galleryImages.length > 1 && (
+              <button className="gallery-nav gallery-prev" onClick={() => stepGallery(-1)} title="Previous (←)">‹</button>
+            )}
+            {galleryUrl && galleryImages.length > 0 && (
+              <img className="gallery-img" src={galleryUrl} alt={galleryImages[galleryIdx]?.name || ''} />
+            )}
+            {galleryImages.length > 1 && (
+              <button className="gallery-nav gallery-next" onClick={() => stepGallery(1)} title="Next (→)">›</button>
+            )}
+          </div>
+          {galleryImages.length > 0 && (
+            <div className="gallery-caption">{galleryImages[galleryIdx]?.name}</div>
+          )}
         </div>
       )}
 

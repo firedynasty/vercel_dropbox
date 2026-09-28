@@ -18,6 +18,7 @@ const DEFAULT_ALIASES = {
   '..': 'cd ..',
   trees: `echo 'tree -d -L 2 -I "node_modules"'`,
   // The old folder presets
+  slideshow: 'gallery',
   videos: 'cd /videos',
   reports: 'cd /chess/reports',
   papers: 'cd /literature/papers',
@@ -31,6 +32,7 @@ const HELP = [
   'open -a chrome <name> open in a new browser tab; also: web <name>',
   'web                   open the current folder in Dropbox',
   'play [path]           play the audio files in a folder (default: here) in the music player',
+  'gallery [path]        browse the images in a folder (← → keys, space = slideshow, esc closes); also: slideshow',
   'which <name|#>        print full path + link   ( which notes | pbcopy )',
   'mv <src...> <dest>    move into folder dest, or rename a single src',
   'cp <src> [dest]       copy a file or folder into a folder or as a new name',
@@ -155,7 +157,7 @@ const pathString = (cwd) => cwd || '/';
 
 const entryLabel = (f) => (f.display || f.name) + (f.isFolder ? '/' : '');
 
-const DropboxTerminal = ({ accessToken, openFile, playMusic, onClose, visible = true, modalOpen = false }) => {
+const DropboxTerminal = ({ accessToken, openFile, playMusic, showGallery, onClose, visible = true, modalOpen = false }) => {
   const [cwd, setCwd] = useState(() => loadJSON(CWD_KEY, ''));
   const [lines, setLines] = useState([{ type: 'out', text: 'Dropbox shell — type "help" for commands.' }]);
   const [input, setInput] = useState('');
@@ -376,6 +378,18 @@ const DropboxTerminal = ({ accessToken, openFile, playMusic, onClose, visible = 
       }
       print('out', `♪ Playing ${pathString(path)} ...`);
       playMusic(path, baseName(path) || 'root');
+    },
+
+    // Browse the images in a folder with the gallery modal (← / → to move, space for a slideshow).
+    gallery: async (args) => {
+      let path = cwd;
+      if (args[0]) {
+        const entry = await resolveTarget(args[0]);
+        if (!entry.isFolder) throw new Error(`gallery: ${args[0]}: Not a folder`);
+        path = entry.path;
+      }
+      print('out', `🖼 Opening gallery for ${pathString(path)} ...`);
+      showGallery(path, baseName(path) || 'root');
     },
 
     mkdir: async (args) => {
@@ -742,10 +756,13 @@ const DropboxTerminal = ({ accessToken, openFile, playMusic, onClose, visible = 
     }
   };
 
-  // Clicking an entry: folders cd into it, files open in the viewer. Search results carry a full path.
+  // Clicking an entry: folders cd into it, files open in the viewer. Entries that aren't in the
+  // current folder (tree output, find results) use their full path so nested clicks work.
   const clickEntry = (f) => {
     if (busy) return;
-    run(`${f.isFolder ? 'cd' : 'open'} ${quoteArg(f.display ? f.pathDisplay : f.name)}`);
+    const full = f.pathDisplay ?? f.path ?? '';
+    const inCwd = parentOf(full).toLowerCase() === cwd.toLowerCase();
+    run(`${f.isFolder ? 'cd' : 'open'} ${quoteArg(inCwd ? f.name : full || '/')}`);
   };
 
   const renderName = (f) => (
