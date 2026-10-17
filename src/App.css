@@ -1233,3 +1233,9 @@
   white-space: nowrap;
   max-width: 260px;
 }
+
+.file-modal-textarea.vim-editor {
+  padding: 0;
+  overflow: hidden;
+  min-height: 0;
+}

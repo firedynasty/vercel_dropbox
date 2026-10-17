@@ -13,7 +13,6 @@ const DEFAULT_ALIASES = {
   ll: 'ls -l',
   la: 'ls',
   l: 'ls',
-  cat: 'open',
   opens: "open -a 'google chrome'",
   c: 'cd',
   '..': 'cd ..',
@@ -24,6 +23,8 @@ const DEFAULT_ALIASES = {
   reports: 'cd /chess/reports',
   papers: 'cd /literature/papers',
 };
+
+const MAX_CAT_LINES = 2000;
 
 const HELP = [
   'ls [-l] [path]        list folder (click an entry to cd/open it)',
@@ -40,6 +41,8 @@ const HELP = [
   'rm <name...>          delete (Dropbox keeps deleted files recoverable for a while)',
   'mkdir <name>          create a folder',
   'touch <name>          create an empty file',
+  'cat <name|#>          print a text file here in the terminal   ( cat notes | grep -i todo )',
+  'vim <name>            edit a text file in the vim editor, creating it if new  (:w save, :q quit, :wq both)',
   'find <text>           search all of Dropbox by name (numbered)',
   'tree [-d] [-L N] [-I "a|b*"] [path]   folder tree (default depth 2, max 6)',
   'echo <text>           print text',
@@ -424,6 +427,66 @@ const DropboxTerminal = ({ accessToken, openFile, playMusic, showGallery, onClos
         invalidate(parentOf(path));
         print('out', `created ${data.path_display}`);
       }
+    },
+
+    // cat <name>: print a text file's contents in the shell (so it pipes into grep / head / pbcopy).
+    cat: async (args) => {
+      if (!args[0]) throw new Error('usage: cat <name|#>');
+      for (const a of args) {
+        const entry = await resolveTarget(a);
+        if (entry.isFolder) throw new Error(`cat: ${a}: Is a folder`);
+        const res = await fetch('https://content.dropboxapi.com/2/files/download', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Dropbox-API-Arg': dropboxApiArg({ path: entry.path }),
+          },
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(`cat: ${a}: ${err.error_summary || `HTTP ${res.status}`}`);
+        }
+        const text = await res.text();
+        if (text.includes('\0')) throw new Error(`cat: ${a}: binary file (use open)`);
+        const lines = text.replace(/\r\n?/g, '\n').replace(/\n$/, '').split('\n');
+        if (text === '') { print('out', '(empty file)'); continue; }
+        lines.slice(0, MAX_CAT_LINES).forEach((l) => print('out', l));
+        if (lines.length > MAX_CAT_LINES) print('out', `… ${lines.length - MAX_CAT_LINES} more lines (use open)`);
+      }
+    },
+
+    // vim <name>: open the file in the vim editor, creating it first if it doesn't exist.
+    vim: async (args) => {
+      if (!args[0]) throw new Error('usage: vim <name>');
+      let entry = null;
+      try {
+        entry = await resolve(args[0]);
+      } catch (e) {
+        if (!/No such file/.test(e.message)) throw e;
+      }
+      if (entry) {
+        if (entry.isFolder) throw new Error(`vim: ${args[0]}: Is a folder`);
+        print('out', `Opening ${entry.name}...`);
+        return openFile({ name: entry.name, pathDisplay: entry.path }, { edit: true });
+      }
+      const path = normalize(cwd, args[0]);
+      const res = await fetch('https://content.dropboxapi.com/2/files/upload', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/octet-stream',
+          'Dropbox-API-Arg': dropboxApiArg({ path, mode: 'add', autorename: false, mute: false }),
+        },
+        body: new Blob(['']),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(`vim: ${err.error_summary || `HTTP ${res.status}`}`);
+      }
+      const data = await res.json();
+      invalidate(parentOf(path));
+      print('out', `created ${data.path_display}`);
+      openFile({ name: data.name, pathDisplay: data.path_display }, { edit: true });
     },
 
     rm: async (args) => {

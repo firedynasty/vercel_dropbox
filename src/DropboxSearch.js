@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { marked } from 'marked';
 import { parseRTF } from '@jonahschulte/rtf-toolkit';
 import DropboxTerminal from './DropboxTerminal';
+import VimEditor from './VimEditor';
 
 // Extract plain text from an RTF document: text nodes carry their content,
 // paragraphs become newlines
@@ -93,6 +94,7 @@ function DropboxSearch() {
   const [modalImgUrl, setModalImgUrl] = useState(null);    // blob URL for image preview
   const [modalQrResult, setModalQrResult] = useState(null); // decoded QR string from image
   const [modalEditMode, setModalEditMode] = useState(false);
+  const modalSavedRef = useRef(''); // last content on Dropbox, so vim can tell unsaved changes
   const [modalShowMd, setModalShowMd] = useState(false);
   const [modalCopied, setModalCopied] = useState(false);
 
@@ -275,7 +277,7 @@ function DropboxSearch() {
 
 
   // Open a file in the full-screen view/edit modal
-  const openFileModal = useCallback(async (line) => {
+  const openFileModal = useCallback(async (line, { edit = false } = {}) => {
     const nameLower = line.name.toLowerCase();
     const isPdf = nameLower.endsWith('.pdf');
     const isImg = isViewableImage(line.name);
@@ -315,13 +317,15 @@ function DropboxSearch() {
           setModalBinary(true);
         } else if (nameLower.endsWith('.rtf')) {
           // Render .rtf as plain text (falls back to raw source if parsing fails)
-          try {
-            setModalContent(rtfToPlainText(text));
-          } catch {
-            setModalContent(text);
-          }
+          let plain = text;
+          try { plain = rtfToPlainText(text); } catch { /* keep raw source */ }
+          modalSavedRef.current = plain;
+          setModalContent(plain);
         } else {
+          modalSavedRef.current = text;
           setModalContent(text);
+          // The terminal's vim command opens straight into the vim editor
+          if (edit) setModalEditMode(true);
         }
       }
     } catch (err) {
@@ -344,8 +348,8 @@ function DropboxSearch() {
   }, [modalContent]);
 
   // Save edited content back to Dropbox (overwrite)
-  const saveModalFile = useCallback(async () => {
-    if (!modalFile || modalSaving) return;
+  const saveModalFile = useCallback(async ({ stay = false } = {}) => {
+    if (!modalFile || modalSaving) return false;
     // .rtf files are shown as extracted plain text — save as a new <name>.txt
     // alongside the original instead of overwriting the .rtf
     const isRtf = modalFile.name.toLowerCase().endsWith('.rtf');
@@ -378,13 +382,16 @@ function DropboxSearch() {
           const txtName = savePath.substring(savePath.lastIndexOf('/') + 1);
           setModalFile({ name: txtName, pathDisplay: savePath });
         }
-        setModalEditMode(false);
+        modalSavedRef.current = modalContent;
+        if (!stay) setModalEditMode(false); // :w stays in the editor
+        return true;
       }
     } catch (err) {
       setModalError('Save error: ' + err.message);
     } finally {
       setModalSaving(false);
     }
+    return false;
   }, [accessToken, modalFile, modalContent, modalSaving]);
 
   // Drag the center divider to resize the two panes; double-click resets the ratio
@@ -664,7 +671,8 @@ function DropboxSearch() {
   useEffect(() => {
     if (!modalFile) return;
     const handleKey = (e) => {
-      if (e.key === 'Escape') { setModalFile(null); return; }
+      // Esc belongs to the vim editor while editing; leave it with :q
+      if (e.key === 'Escape') { if (!modalEditMode) setModalFile(null); return; }
       // ← / → browse sibling images; also works from an empty shell prompt, where the keys do nothing else
       if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && imageIdx >= 0 && !e.metaKey && !e.ctrlKey && !e.altKey) {
         const t = e.target;
@@ -1232,7 +1240,7 @@ function DropboxSearch() {
                 <>
                   <button
                     className="file-modal-save-btn"
-                    onClick={saveModalFile}
+                    onClick={() => saveModalFile()}
                     disabled={modalSaving}
                   >
                     {modalSaving ? 'Saving...' : 'Save'}
@@ -1316,12 +1324,14 @@ function DropboxSearch() {
               </div>
             )}
             {!modalLoading && !modalError && !modalBinary && modalEditMode && (
-              <textarea
-                className="file-modal-textarea"
+              <VimEditor
                 value={modalContent}
-                onChange={(e) => setModalContent(e.target.value)}
-                spellCheck={false}
-                autoFocus
+                onChange={setModalContent}
+                fontSize={15}
+                onSave={() => saveModalFile({ stay: true })}
+                onQuit={() => setModalEditMode(false)}
+                isDirty={() => modalContent !== modalSavedRef.current}
+                onError={setStatus}
               />
             )}
             {!modalLoading && !modalError && !modalBinary && !modalEditMode && modalShowMd && (
