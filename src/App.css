@@ -956,6 +956,63 @@
   background: #16213e;
 }
 
+.music-memo {
+  padding: 8px 14px;
+  border-top: 1px solid #2a2a4a;
+}
+
+.music-memo-row {
+  display: flex;
+  gap: 6px;
+}
+
+.music-memo-input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  background: #16213e;
+  border: 1px solid #2a2a4a;
+  border-radius: 4px;
+  color: #e0e0e0;
+  font-size: 11px;
+}
+
+.music-memo-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.music-memo-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 4px 3px 9px;
+  border-radius: 10px;
+  background: #1e3a5f;
+  color: #90caf9;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.music-memo-pill:hover { background: #29508a; }
+
+.music-memo-del {
+  background: none;
+  border: none;
+  color: #6b8fb8;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 4px;
+}
+
+.music-memo-del:hover { color: #fff; }
+
 .music-chapter-list {
   max-height: 200px;
   overflow-y: auto;

@@ -125,6 +125,8 @@ function DropboxSearch() {
   const [musicVolume, setMusicVolume] = useState(80);
   const [musicUrlLoading, setMusicUrlLoading] = useState(false);
   const [musicChapters, setMusicChapters] = useState([]); // parsed chapters for current track
+  const [memoPills, setMemoPills] = useState([]); // [{ t: seconds, note }] for the current track
+  const [memoInput, setMemoInput] = useState('');
 
   // Image gallery / slideshow state
   const [galleryModal, setGalleryModal] = useState(null); // { folderPath, folderName }
@@ -910,6 +912,40 @@ function DropboxSearch() {
     return () => window.removeEventListener('keydown', handleKey);
   }, [musicModal, toggleMusicPlay]);
 
+  // Memorize pills: saved per track name; click a pill to jump back to that moment
+  const memoKey = musicTracks[musicCurrentIdx] ? `memoPills:${musicTracks[musicCurrentIdx].name}` : '';
+
+  useEffect(() => {
+    try { setMemoPills(memoKey ? JSON.parse(localStorage.getItem(memoKey)) || [] : []); } catch { setMemoPills([]); }
+  }, [memoKey]);
+
+  const saveMemoPills = useCallback((pills) => {
+    const sorted = [...pills].sort((a, b) => a.t - b.t);
+    setMemoPills(sorted);
+    try { localStorage.setItem(memoKey, JSON.stringify(sorted)); } catch { /* ignore */ }
+  }, [memoKey]);
+
+  // Comma-separated entries each become a pill: "1:23 note" marks 1:23; plain "note" marks the current position
+  const addMemoPill = useCallback(() => {
+    const audio = musicAudioRef.current;
+    if (!audio || !memoKey) return;
+    const added = memoInput.split(',').map((part) => part.trim()).filter(Boolean).map((part) => {
+      const tm = part.match(/^(?:(\d+):)?(\d{1,2}):(\d{2})\b\s*(.*)$/);
+      if (!tm) return { t: Math.floor(audio.currentTime), note: part };
+      return { t: Number(tm[1] || 0) * 3600 + Number(tm[2]) * 60 + Number(tm[3]), note: tm[4] };
+    });
+    if (added.length === 0) return;
+    saveMemoPills([...memoPills, ...added]);
+    setMemoInput('');
+  }, [memoInput, memoKey, memoPills, saveMemoPills]);
+
+  const jumpToMemo = useCallback((t) => {
+    const audio = musicAudioRef.current;
+    if (!audio) return;
+    audio.currentTime = t;
+    audio.play().catch(() => {});
+  }, []);
+
   // Auto-scroll chapter list to keep active chapter visible
   useEffect(() => {
     const list = chapterListRef.current;
@@ -1475,6 +1511,38 @@ function DropboxSearch() {
                   >
                     YT
                   </a>
+                )}
+              </div>
+
+              {/* Memorize: mark moments as pills, click to jump back */}
+              <div className="music-memo">
+                <div className="music-memo-row">
+                  <input
+                    className="music-memo-input"
+                    value={memoInput}
+                    placeholder="note (marks now), 1:23 note, 2:10, 3:05 …"
+                    onChange={(e) => setMemoInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') addMemoPill(); e.stopPropagation(); }}
+                  />
+                  <button className="music-btn" onClick={addMemoPill} title="Mark this moment">+</button>
+                </div>
+                {memoPills.length > 0 && (
+                  <div className="music-memo-pills">
+                    {memoPills.map((p, i) => (
+                      <span key={i} className="music-memo-pill" title={p.note || formatTime(p.t)}>
+                        <span onClick={() => jumpToMemo(p.t)}>
+                          {formatTime(p.t)}{p.note ? ` ${p.note.slice(0, 18)}${p.note.length > 18 ? '…' : ''}` : ''}
+                        </span>
+                        <button
+                          className="music-memo-del"
+                          onClick={() => saveMemoPills(memoPills.filter((_, j) => j !== i))}
+                          title="Remove"
+                        >
+                          &times;
+                        </button>
+                      </span>
+                    ))}
+                  </div>
                 )}
               </div>
 
