@@ -829,12 +829,11 @@ function DropboxSearch() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Global media keys ──────────────────────────────────────────────────────
-  // Hammerspoon turns F7 / F8 / F9 into the system REWIND / PLAY / FAST events
+  // Hammerspoon turns F7 / F9 into the system REWIND / FAST events
   // (see ~/.hammerspoon/init.lua), so these work with Chrome unfocused.
-  // Chrome on macOS delivers REWIND/FAST as previoustrack/nexttrack, so those
-  // handlers are wired to a +/- STEP nudge — that is the rewind / fast-forward
-  // behavior we want on F7 / F9. Point them at playMusicTrack(idx +/- 1)
-  // instead if you would rather the media keys change tracks.
+  // Chrome on macOS delivers REWIND/FAST as previoustrack/nexttrack, which step
+  // to the previous / next track in the folder — same as the modal's buttons.
+  // seekbackward/seekforward still nudge by STEP, for anything that sends them.
   useEffect(() => {
     const audio = musicAudioRef.current;
     if (!audio || !('mediaSession' in navigator)) return;
@@ -858,6 +857,14 @@ function DropboxSearch() {
       syncPosition();
     };
 
+    // Refs, not state: this effect runs once, and both are refreshed every render
+    const goToTrack = (delta) => {
+      const tracks = musicTracksRef.current;
+      const idx = musicCurrentIdxRef.current + delta;
+      if (idx < 0 || idx >= tracks.length) return;
+      fetchAndPlayRef.current(tracks[idx], idx);
+    };
+
     const handlers = {
       play: () => { audio.play().catch(() => {}); },
       pause: () => audio.pause(),
@@ -867,8 +874,8 @@ function DropboxSearch() {
       seekto: (d) => {
         if (d && d.seekTime != null) { audio.currentTime = d.seekTime; syncPosition(); }
       },
-      previoustrack: () => seekBy(-STEP),
-      nexttrack: () => seekBy(STEP),
+      previoustrack: () => goToTrack(-1),
+      nexttrack: () => goToTrack(1),
     };
 
     Object.keys(handlers).forEach((action) => {
