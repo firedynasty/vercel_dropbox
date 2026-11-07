@@ -828,6 +828,85 @@ function DropboxSearch() {
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Global media keys ──────────────────────────────────────────────────────
+  // Hammerspoon turns F7 / F8 / F9 into the system REWIND / PLAY / FAST events
+  // (see ~/.hammerspoon/init.lua), so these work with Chrome unfocused.
+  // Chrome on macOS delivers REWIND/FAST as previoustrack/nexttrack, so those
+  // handlers are wired to a +/- STEP nudge — that is the rewind / fast-forward
+  // behavior we want on F7 / F9. Point them at playMusicTrack(idx +/- 1)
+  // instead if you would rather the media keys change tracks.
+  useEffect(() => {
+    const audio = musicAudioRef.current;
+    if (!audio || !('mediaSession' in navigator)) return;
+    const ms = navigator.mediaSession;
+    const STEP = 10; // seconds moved per F7 / F9 press
+
+    const syncPosition = () => {
+      if (!isFinite(audio.duration) || audio.duration <= 0) return;
+      try {
+        ms.setPositionState({
+          duration: audio.duration,
+          position: Math.min(Math.max(audio.currentTime, 0), audio.duration),
+          playbackRate: audio.playbackRate || 1,
+        });
+      } catch { /* unsupported */ }
+    };
+
+    const seekBy = (delta) => {
+      if (!isFinite(audio.duration) || audio.duration <= 0) return;
+      audio.currentTime = Math.max(0, Math.min(audio.duration, audio.currentTime + delta));
+      syncPosition();
+    };
+
+    const handlers = {
+      play: () => { audio.play().catch(() => {}); },
+      pause: () => audio.pause(),
+      stop: () => { audio.pause(); audio.currentTime = 0; },
+      seekbackward: (d) => seekBy(-((d && d.seekOffset) || STEP)),
+      seekforward: (d) => seekBy((d && d.seekOffset) || STEP),
+      seekto: (d) => {
+        if (d && d.seekTime != null) { audio.currentTime = d.seekTime; syncPosition(); }
+      },
+      previoustrack: () => seekBy(-STEP),
+      nexttrack: () => seekBy(STEP),
+    };
+
+    Object.keys(handlers).forEach((action) => {
+      try { ms.setActionHandler(action, handlers[action]); } catch { /* unsupported action */ }
+    });
+
+    const onPlay = () => { ms.playbackState = 'playing'; syncPosition(); };
+    const onPause = () => { ms.playbackState = 'paused'; syncPosition(); };
+    audio.addEventListener('play', onPlay);
+    audio.addEventListener('pause', onPause);
+    audio.addEventListener('durationchange', syncPosition);
+    audio.addEventListener('seeked', syncPosition);
+
+    return () => {
+      Object.keys(handlers).forEach((action) => {
+        try { ms.setActionHandler(action, null); } catch { /* unsupported action */ }
+      });
+      ms.playbackState = 'none';
+      audio.removeEventListener('play', onPlay);
+      audio.removeEventListener('pause', onPause);
+      audio.removeEventListener('durationchange', syncPosition);
+      audio.removeEventListener('seeked', syncPosition);
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Label the macOS Now Playing panel with the track that is actually loaded
+  useEffect(() => {
+    if (!('mediaSession' in navigator) || typeof window.MediaMetadata === 'undefined') return;
+    const track = musicTracks[musicCurrentIdx];
+    if (!track) return;
+    try {
+      navigator.mediaSession.metadata = new window.MediaMetadata({
+        title: track.name.replace(/\.[^.]+$/, ''),
+        artist: musicModal ? musicModal.folderName : '',
+      });
+    } catch { /* unsupported */ }
+  }, [musicTracks, musicCurrentIdx, musicModal]);
+
   // Open the music player for a folder: fetch audio files then start first track
   const openMusicPlayer = useCallback(async (folderPath, folderName) => {
     if (musicAudioRef.current) musicAudioRef.current.pause();
